@@ -15,6 +15,7 @@ set -eu
 # ── Constants ────────────────────────────────────────────────────────────────
 
 BOLD='\033[1m'
+DIM='\033[2m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
@@ -117,7 +118,7 @@ main() {
   # ── Choose repo ──────────────────────────────────────────────────────────
 
   printf "\n${BOLD}  Which repo do you want to work on?${RESET}\n\n"
-  printf "  ${CYAN}1${RESET}  resQ          Full platform (monorepo, private — requires org access)\n"
+  printf "  ${CYAN}1${RESET}  resQ          Full platform monorepo ${DIM}(private)${RESET}\n"
   printf "  ${CYAN}2${RESET}  programs      Solana/Anchor on-chain programs\n"
   printf "  ${CYAN}3${RESET}  dotnet-sdk    .NET client libraries\n"
   printf "  ${CYAN}4${RESET}  mcp           MCP server for AI clients\n"
@@ -147,27 +148,79 @@ main() {
     info "$TARGET_DIR already exists — pulling latest..."
     git -C "$TARGET_DIR" pull --ff-only 2>/dev/null || true
   else
-    info "Cloning $ORG/$REPO → $TARGET_DIR"
+    info "Cloning $ORG/$REPO into $TARGET_DIR"
     mkdir -p "$(dirname "$TARGET_DIR")"
     gh repo clone "$ORG/$REPO" "$TARGET_DIR"
   fi
 
   ok "Repository ready at $TARGET_DIR"
 
-  # ── Enter dev environment ────────────────────────────────────────────────
+  # ── Post-clone setup ───────────────────────────────────────────────────
 
   if [ -f "$TARGET_DIR/flake.nix" ]; then
-    info "Nix flake detected — entering dev environment..."
-    printf "\n${BOLD}${GREEN}  Ready!${RESET} Run:\n\n"
-    printf "    cd %s\n" "$TARGET_DIR"
-    printf "    nix develop\n\n"
-  elif [ -f "$TARGET_DIR/shell.nix" ]; then
-    printf "\n${BOLD}${GREEN}  Ready!${RESET} Run:\n\n"
-    printf "    cd %s\n" "$TARGET_DIR"
-    printf "    nix-shell\n\n"
-  else
-    printf "\n${BOLD}${GREEN}  Ready!${RESET} Run:\n\n"
-    printf "    cd %s\n\n" "$TARGET_DIR"
+    info "Nix flake detected — building dev environment (first run may take a few minutes)..."
+    nix develop "$TARGET_DIR" --command echo "Environment ready" 2>/dev/null || true
+  fi
+
+  # Git hooks
+  if [ -f "$TARGET_DIR/tools/scripts/setup-hooks.sh" ]; then
+    info "Setting up git hooks..."
+    (cd "$TARGET_DIR" && bash tools/scripts/setup-hooks.sh 2>/dev/null) || true
+    ok "Git hooks configured (pre-commit, pre-push, commit-msg)"
+  elif [ -f "$TARGET_DIR/package.json" ] && grep -q "setup-hooks" "$TARGET_DIR/package.json" 2>/dev/null; then
+    info "Git hooks will be configured on first install"
+  fi
+
+  # ── Print what you get ─────────────────────────────────────────────────
+
+  printf "\n${BOLD}${GREEN}  Ready!${RESET}\n\n"
+  printf "  ${BOLD}Get started:${RESET}\n\n"
+  printf "    cd %s\n" "$TARGET_DIR"
+
+  if [ -f "$TARGET_DIR/flake.nix" ]; then
+    printf "    nix develop\n"
+  fi
+
+  if [ -f "$TARGET_DIR/Makefile" ]; then
+    printf "    make help\n"
+  fi
+
+  printf "\n"
+
+  # Show what's included based on repo
+  if [ "$REPO" = "resQ" ]; then
+    printf "  ${BOLD}What's included:${RESET}\n\n"
+    printf "  ${DIM}Toolchain (via Nix)${RESET}\n"
+    printf "    Rust, Node/Bun, Python, .NET, C++, CMake, Protobuf\n\n"
+    printf "  ${DIM}Quality gates (automatic on commit)${RESET}\n"
+    printf "    Copyright headers, secret scanning, formatting (Rust/TS/Python/C++/C#)\n"
+    printf "    OSV vulnerability scan, debug statement detection, file size limits\n\n"
+    printf "  ${DIM}Security workflows (CI)${RESET}\n"
+    printf "    OSV scan, dependency review, CodeQL, secret scanning\n"
+    printf "    AI-powered: secrets analysis, security compliance audits\n\n"
+    printf "  ${DIM}Developer tools${RESET}\n"
+    printf "    resq CLI     — audit, health checks, log viewer, perf monitor\n"
+    printf "    make test     — run all tests across all languages\n"
+    printf "    make build    — build all services\n"
+    printf "    make dev      — start dev servers\n"
+    printf "    make lint     — lint everything\n\n"
+  elif [ "$REPO" = "programs" ]; then
+    printf "  ${BOLD}What's included:${RESET}\n\n"
+    printf "    Solana CLI, Anchor framework, Rust toolchain\n"
+    printf "    make anchor-build, make anchor-test\n\n"
+  elif [ "$REPO" = "mcp" ]; then
+    printf "  ${BOLD}What's included:${RESET}\n\n"
+    printf "    Python 3.11-3.13, uv, ruff, mypy\n"
+    printf "    Pre-commit hooks for formatting + security\n"
+    printf "    90%% test coverage threshold enforced\n\n"
+  elif [ "$REPO" = "cli" ]; then
+    printf "  ${BOLD}What's included:${RESET}\n\n"
+    printf "    Rust toolchain, clippy, cargo-deny\n"
+    printf "    9 crates: audit, cleanup, deploy, explore, health, logs, tui\n\n"
+  elif [ "$REPO" = "ui" ]; then
+    printf "  ${BOLD}What's included:${RESET}\n\n"
+    printf "    Bun, TypeScript, React 19, Storybook, Chromatic\n"
+    printf "    55+ components, Biome linter\n\n"
   fi
 }
 
