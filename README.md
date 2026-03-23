@@ -2,8 +2,16 @@
 
 One command to get started with any ResQ repository.
 
+**macOS / Linux:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/resq-software/dev/main/install.ps1 | iex
 ```
 
 ## What happens
