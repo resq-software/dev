@@ -40,47 +40,21 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 
 ## Repositories
 
-### Platform
+| Repo | What | Languages |
+|---|---|---|
+| [`resQ`](https://github.com/resq-software/resQ) | Platform monorepo | Polyglot (private) |
+| [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
+| [`resq-proto`](https://github.com/resq-software/resq-proto) | Shared Protobuf definitions | Protobuf |
+| [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
+| [`mcp`](https://github.com/resq-software/mcp) | MCP server for AI clients | Python |
+| [`cli`](https://github.com/resq-software/cli) | Developer CLI/TUI tools | Rust |
+| [`ui`](https://github.com/resq-software/ui) | React component library | TypeScript |
+| [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
+| [`cms`](https://github.com/resq-software/cms) | Content management | TypeScript |
+| [`docs`](https://github.com/resq-sw/docs) | Documentation site | MDX |
+| [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell |
 
-| Repo | What | Languages | Deploy |
-|---|---|---|---|
-| [`resQ`](https://github.com/resq-software/resQ) | Full platform monorepo — 7 services, 8 libs, 9 tools | Rust, TS, Python, C#, C++ | Docker / K8s |
-| [`programs`](https://github.com/resq-software/programs) | Solana on-chain — airspace management, delivery proof | Rust (Anchor) | Solana devnet |
-| [`resq-proto`](https://github.com/resq-software/resq-proto) | Canonical Protobuf definitions (6 .proto files) | Protobuf | Buf BSR |
-| [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET 9 client libraries — Core, Clients, Blockchain, Storage, Simulation | C# | NuGet |
-| [`mcp`](https://github.com/resq-software/mcp) | FastMCP server connecting AI agents to ResQ | Python | PyPI / GHCR |
-| [`cli`](https://github.com/resq-software/cli) | Rust CLI/TUI toolchain — 9 crates | Rust | crates.io |
-
-### Frontend
-
-| Repo | What | Languages | Deploy |
-|---|---|---|---|
-| [`ui`](https://github.com/resq-software/ui) | 56-component React design system (shadcn + Radix + Tailwind v4) | TypeScript | npm (`@resq-sw/ui`) |
-| [`landing`](https://github.com/resq-software/landing) | Marketing site — i18n (5 languages), PWA | TypeScript (Next.js 15) | Cloudflare Pages |
-| [`cms`](https://github.com/resq-software/cms) | Content management — posts, media, contacts | TypeScript (Payload CMS) | Cloudflare Workers |
-| [`docs`](https://github.com/resq-sw/docs) | Documentation site — guides + API reference | MDX (Mintlify) | Mintlify |
-
-### Infrastructure
-
-| Repo | What |
-|---|---|
-| [`dev`](https://github.com/resq-software/dev) | This repo — install scripts, onboarding, org-wide conventions |
-
-### How repos connect
-
-```
-resq-proto (source of truth)
-  ├─ publish ──► Buf Schema Registry (private)
-  ├─ auto-sync ► resQ/libs/protocols/
-  └─ auto-sync ► dotnet-sdk/protos/
-
-satellite repos (cli, ui, mcp, programs, dotnet-sdk, landing)
-  └─ sync-to-mono ► resQ monorepo main
-
-ui (@resq-sw/ui on npm)
-  ├─ consumed by ► landing
-  └─ consumed by ► resQ/services/web-dashboard
-```
+Public repos sync to the monorepo automatically.
 
 ---
 
@@ -92,12 +66,10 @@ Every repo uses Nix flakes for its dev environment. The pattern is always `cd <r
 
 ```bash
 cd ~/resq/resQ && nix develop
-make install          # Install all dependencies
-make dev              # Start full stack (all services)
-make test             # Run ~140+ tests across all languages
-make build            # Build everything
-make codegen          # Regenerate Protobuf bindings
+make help             # See available commands
 ```
+
+See the repo's `AGENTS.md` for full details (private).
 
 ### programs (Solana)
 
@@ -281,22 +253,7 @@ Concrete, testable rules. Not vibes — things you can grep for in a diff.
 Before/after pairs or code snippets showing correct application.
 ```
 
-**Repo-specific skills** go in that repo's `.agents/skills/`:
-
-```
-mcp/.agents/skills/
-├── fastmcp-tools/SKILL.md       # How to write MCP tool handlers
-├── pydantic-models/SKILL.md     # Model conventions for this project
-└── testing-strategy/SKILL.md    # 90% coverage, hypothesis testing, no mocks
-
-programs/.agents/skills/
-├── anchor-accounts/SKILL.md     # PDA patterns, account validation
-└── solana-testing/SKILL.md      # Local validator, integration test setup
-
-ui/.agents/skills/
-├── component-authoring/SKILL.md # shadcn patterns, cva variants, data-slot
-└── storybook-stories/SKILL.md   # Story format, a11y, perf panels
-```
+**Repo-specific skills** go in that repo's `.agents/skills/`. For example, a UI library might have `component-authoring/SKILL.md` and `storybook-stories/SKILL.md`, while a Solana repo might have `anchor-accounts/SKILL.md`.
 
 ### Keeping things in sync
 
@@ -335,40 +292,7 @@ Everything is pinned via Nix flakes. No "works on my machine" issues.
 
 ## Quality gates
 
-The `resq` CLI runs a TUI-based pre-commit check on every commit:
-
-- Copyright headers on all source files
-- Large file detection (>10 MiB)
-- Debug statement scanning
-- Secret scanning (API keys, tokens, credentials)
-- Security audit (OSV + npm audit-ci)
-- Auto-formatting: Rust (`rustfmt`), TS (`biome`), Python (`ruff`), C++ (`clang-format`), C# (`dotnet format`)
-
-## CI security workflows
-
-| Workflow | Schedule | Engine |
-|---|---|---|
-| OSV vulnerability scan | On dependency changes | GitHub Actions |
-| Dependency review | On PRs | GitHub Actions |
-| Secrets analysis | Daily | Copilot (gh-aw) |
-| Security compliance audit | Weekly | Copilot (gh-aw) |
-| AI code auditor | On PRs | Copilot (gh-aw) |
-| Breaking change checker | On PRs | Copilot (gh-aw) |
-
-## Developer tools (resq CLI)
-
-```
-resq audit          Run security audits
-resq clean          Clean build artifacts
-resq deploy         Deploy services
-resq dev kill-ports Free up bound ports
-resq dev sync-env   Sync environment variables
-resq dev upgrade    Upgrade dependencies
-resq explore        Performance profiler / binary explorer
-resq health         Service health checker
-resq logs           Log viewer / aggregator
-resq pre-commit     Run all pre-commit checks
-```
+Git hooks enforce formatting, linting, secret scanning, and license headers on every commit. Each repo's `AGENTS.md` documents its specific checks.
 
 ## License
 
