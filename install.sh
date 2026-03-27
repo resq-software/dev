@@ -24,7 +24,7 @@
 # ── Bash re-exec ─────────────────────────────────────────────────────────────
 # When piped to sh, re-exec under bash for pipefail support if available.
 
-if [ -z "${_RESQ_REEXEC:-}" ] && command -v bash >/dev/null 2>&1; then
+if [ -z "${_RESQ_REEXEC:-}" ] && [ -f "$0" ] && command -v bash >/dev/null 2>&1; then
   export _RESQ_REEXEC=1
   exec bash "$0" "$@"
 fi
@@ -62,8 +62,8 @@ has() { command -v "$1" >/dev/null 2>&1; }
 # Compare two dotted version strings. Returns 0 if $1 >= $2.
 # POSIX-compatible: uses IFS splitting and positional params (no arrays).
 version_gte() {
-  _vgte_ver="$1"
-  _vgte_min="$2"
+  _vgte_ver="$(echo "$1" | sed 's/[^0-9.]//g')"
+  _vgte_min="$(echo "$2" | sed 's/[^0-9.]//g')"
 
   # Split $1 into positional params
   _vgte_old_ifs="$IFS"
@@ -107,7 +107,7 @@ require_version() {
 confirm() {
   if [ "${YES:-0}" = "1" ]; then return 0; fi
   printf "%s [y/N] " "$1" >&2
-  read -r _confirm_answer
+  read -r _confirm_answer < /dev/tty
   case "$_confirm_answer" in
     [yY]|[yY][eE][sS]) return 0 ;;
     *) return 1 ;;
@@ -215,7 +215,7 @@ choose_repo() {
   printf "  ${CYAN} 9${RESET}  cms           Content management\n" >&2
   printf "  ${CYAN}10${RESET}  docs          Documentation site\n" >&2
   printf "\n  Choice [1-10]: " >&2
-  read -r choice
+  read -r choice < /dev/tty
 
   case "$choice" in
     1)  REPO="resQ" ;;
