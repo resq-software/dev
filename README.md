@@ -46,12 +46,13 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
 | [`resq-proto`](https://github.com/resq-software/resq-proto) | Shared Protobuf definitions | Protobuf |
 | [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
-| [`mcp`](https://github.com/resq-software/mcp) | MCP server for AI clients | Python |
-| [`cli`](https://github.com/resq-software/cli) | Developer CLI/TUI tools | Rust |
-| [`ui`](https://github.com/resq-software/ui) | React component library | TypeScript |
+| [`pypi`](https://github.com/resq-software/pypi) | Python packages (MCP + DSA) | Python |
+| [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA) | Rust |
+| [`npm`](https://github.com/resq-software/npm) | TypeScript packages (UI + DSA) | TypeScript |
+| [`vcpkg`](https://github.com/resq-software/vcpkg) | C++ libraries | C++ |
 | [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
 | [`cms`](https://github.com/resq-software/cms) | Content management | TypeScript |
-| [`docs`](https://github.com/resq-sw/docs) | Documentation site | MDX |
+| [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
 | [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell |
 
 Public repos sync to the monorepo automatically.
@@ -89,33 +90,42 @@ dotnet test -c Release
 dotnet format --verify-no-changes       # Style check
 ```
 
-### mcp (Python)
+### pypi (Python)
 
 ```bash
-cd ~/resq/mcp && nix develop
-uv run resq-mcp                         # Start server (STDIO)
+cd ~/resq/pypi && nix develop
+uv run resq-mcp                         # Start MCP server (STDIO)
 uv run pytest                           # Tests (90% coverage gate)
 uv run ruff check .                     # Lint
 uv run mypy .                           # Type check (strict)
 ```
 
-### cli (Rust)
+### crates (Rust)
 
 ```bash
-cd ~/resq/cli && nix develop
-cargo build                             # Build all 9 crates
+cd ~/resq/crates && nix develop
+cargo build                             # Build all workspace crates
 cargo test                              # Run tests
 cargo clippy --workspace -- -D warnings # Lint (pedantic)
 ```
 
-### ui (React components)
+### npm (TypeScript packages)
 
 ```bash
-cd ~/resq/ui && nix develop
-bun build              # Build src/ → lib/
+cd ~/resq/npm && nix develop
+bun build              # Build packages
 bun test               # Vitest
 bun storybook          # Component browser on :6006
 bun lint               # Biome check
+```
+
+### vcpkg (C++)
+
+```bash
+cd ~/resq/vcpkg && nix develop
+cmake --build build            # Build libraries
+ctest --test-dir build         # Run tests
+clang-format --dry-run src/**  # Style check
 ```
 
 ### landing
