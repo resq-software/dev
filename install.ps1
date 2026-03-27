@@ -39,7 +39,7 @@ $IsNativeWindows = $IsWindows -or (-not $IsLinux -and -not $IsMacOS -and
 function Write-Info { param([string]$Msg) Write-Host "info  $Msg" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Msg) Write-Host "  ok  $Msg" -ForegroundColor Green }
 function Write-Warn { param([string]$Msg) Write-Host "warn  $Msg" -ForegroundColor Yellow }
-function Write-Fail { param([string]$Msg) Write-Host "fail  $Msg" -ForegroundColor Red; exit 1 }
+function Write-Fail { param([string]$Msg) Write-Host "fail  $Msg" -ForegroundColor Red; throw $Msg }
 
 function Test-Command {
     param([string]$Name)
@@ -161,14 +161,8 @@ function Install-GitHubCLI {
 }
 
 function Connect-GitHub {
-    $authOk = $false
-    try {
-        gh auth status 2>&1 | Out-Null
-        $authOk = $true
-    }
-    catch { }
-
-    if (-not $authOk) {
+    gh auth status 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
         Write-Info 'Not logged in to GitHub — starting auth...'
         gh auth login
     }
@@ -278,8 +272,7 @@ function Initialize-Repo {
     if (Test-Path $hookScript) {
         Write-Info 'Setting up git hooks...'
         Push-Location $script:TargetDir
-        try { bash tools/scripts/setup-hooks.sh 2>$null } catch { }
-        Pop-Location
+        try { bash tools/scripts/setup-hooks.sh 2>$null } catch { } finally { Pop-Location }
         Write-Ok 'Git hooks configured'
     }
 }
