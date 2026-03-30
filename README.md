@@ -1,28 +1,16 @@
-# ResQ Developer Setup
+<div align="center">
+  <h1>🛠 ResQ Dev Setup</h1>
+  <p><em>One command to bootstrap the entire ResQ development environment.</em></p>
 
-One command to get started with any ResQ repository.
+  [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+  [![Shell](https://img.shields.io/badge/Shell-bash-4EAA25?style=flat-square)](#)
+  [![Nix](https://img.shields.io/badge/Nix-flakes-5277C3?style=flat-square)](#)
+  [![Make](https://img.shields.io/badge/GNU-Make-A42E2B?style=flat-square)](#)
+</div>
 
-**macOS / Linux:**
+---
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-irm https://raw.githubusercontent.com/resq-software/dev/main/install.ps1 | iex
-```
-
-Or inspect before running:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh -o install.sh
-less install.sh
-sh install.sh
-```
-
-## What happens
+## ⚡ What happens
 
 1. Installs `gh` (GitHub CLI) if missing
 2. Authenticates with GitHub
@@ -38,7 +26,7 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 
 ---
 
-## Repositories
+## 📦 Repositories
 
 | Repo | What | Languages |
 |---|---|---|
@@ -59,107 +47,22 @@ Public repos sync to the monorepo automatically.
 
 ---
 
-## Quick start per repo
+## 🚀 Quick Start per Repo
 
-Every repo uses Nix flakes for its dev environment. The pattern is always `cd <repo> && nix develop`, then use the commands from that repo's `AGENTS.md`.
+| Repo | Language | Setup |
+|------|----------|-------|
+| resQ | Rust · TS · Python · C++ · C# | `make bootstrap` |
+| programs | Rust / Anchor | `anchor build` |
+| dotnet-sdk | C# / .NET 9 | `dotnet restore` |
+| pypi | Python | `uv sync` |
+| crates | Rust | `cargo build` |
+| npm | TypeScript | `bun install` |
+| vcpkg | C++ | `cmake --preset default` |
+| landing | Next.js | `bun install && bun dev` |
+| docs | MDX / Mintlify | `mintlify dev` |
 
-### resQ (monorepo)
 
-```bash
-cd ~/resq/resQ && nix develop
-make help             # See available commands
-```
-
-See the repo's `AGENTS.md` for full details (private).
-
-### programs (Solana)
-
-```bash
-cd ~/resq/programs && nix develop
-anchor build                            # Compile .so artifacts
-anchor test                             # Run against local validator
-cargo clippy --workspace -- -D warnings # Lint
-```
-
-### dotnet-sdk
-
-```bash
-cd ~/resq/dotnet-sdk && nix develop
-dotnet build -c Release
-dotnet test -c Release
-dotnet format --verify-no-changes       # Style check
-```
-
-### pypi (Python)
-
-```bash
-cd ~/resq/pypi && nix develop
-uv run resq-mcp                         # Start MCP server (STDIO)
-uv run pytest                           # Tests (90% coverage gate)
-uv run ruff check .                     # Lint
-uv run mypy .                           # Type check (strict)
-```
-
-### crates (Rust)
-
-```bash
-cd ~/resq/crates && nix develop
-cargo build                             # Build all workspace crates
-cargo test                              # Run tests
-cargo clippy --workspace -- -D warnings # Lint (pedantic)
-```
-
-### npm (TypeScript packages)
-
-```bash
-cd ~/resq/npm && nix develop
-bun build              # Build packages
-bun test               # Vitest
-bun storybook          # Component browser on :6006
-bun lint               # Biome check
-```
-
-### vcpkg (C++)
-
-```bash
-cd ~/resq/vcpkg && nix develop
-cmake --build build            # Build libraries
-ctest --test-dir build         # Run tests
-clang-format --dry-run src/**  # Style check
-```
-
-### landing
-
-```bash
-cd ~/resq/landing && nix develop
-bun dev                # Dev server on :3000 (Turbopack)
-bun build              # Production build
-bun test --coverage    # Vitest
-bun lint               # Biome check
-```
-
-### cms
-
-```bash
-cd ~/resq/cms
-pnpm install
-pnpm dev               # Dev server with Wrangler bindings
-pnpm build             # Production build
-pnpm test              # Integration + E2E tests
-pnpm deploy            # Deploy to Cloudflare Workers
-```
-
-### docs
-
-```bash
-cd ~/resq/docs
-npx mint dev           # Local preview on :3000
-# Deployment is automatic via Mintlify GitHub App on push to main
-```
-
----
-
-## AI-assisted development
+## 🔧 AI-assisted development
 
 Every ResQ repo is structured for AI-assisted development. Human developers and AI tools (Claude Code, Cursor, Codex, Gemini, GitHub Copilot) share the same context through a standardized directory layout and canonical guidance files.
 
@@ -233,7 +136,7 @@ Directory tree with one-line descriptions of each top-level directory.
 ## Commands
 The 5-8 commands a developer needs daily: build, test, lint, dev, deploy.
 
-## Architecture
+## 🏗 Architecture
 Key design decisions: frameworks, patterns, data flow, boundaries.
 
 ## Standards
@@ -286,7 +189,7 @@ Every repo with both `AGENTS.md` and `CLAUDE.md` includes an `agent-sync.sh` scr
 
 ---
 
-## Toolchain
+## 🔧 Toolchain
 
 Everything is pinned via Nix flakes. No "works on my machine" issues.
 
@@ -300,10 +203,10 @@ Everything is pinned via Nix flakes. No "works on my machine" issues.
 | Protobuf | `buf`, `protoc` |
 | Solana | `solana-cli`, `anchor` |
 
-## Quality gates
+## ✅ Quality gates
 
 Git hooks enforce formatting, linting, secret scanning, and license headers on every commit. Each repo's `AGENTS.md` documents its specific checks.
 
-## License
+## 📄 License
 
 Apache License 2.0
