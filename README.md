@@ -41,7 +41,7 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
 | [`cms`](https://github.com/curvance-web/cms) | Content management | TypeScript |
 | [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
-| [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell |
+| [`dev`](https://github.com/resq-software/dev) | This repo — in·stall scripts and onboarding | Shell |
 
 Public repos sync to the monorepo automatically.
 
