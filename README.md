@@ -39,7 +39,7 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | [`npm`](https://github.com/resq-software/npm) | TypeScript packages (UI + DSA) | TypeScript |
 | [`vcpkg`](https://github.com/resq-software/vcpkg) | C++ libraries | C++ |
 | [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
-| [`cms`](https://github.com/resq-software/cms) | Content management | TypeScript |
+| [`cms`](https://github.com/curvance-web/cms) | Content management | TypeScript |
 | [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
 | [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell |
 
