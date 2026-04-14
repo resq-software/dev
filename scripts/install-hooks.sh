@@ -12,8 +12,10 @@
 #     curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-hooks.sh | sh
 #
 # Env:
-#     RESQ_DEV_REF  — git ref for raw hook fetch (default: main)
-#     GIT_HOOKS_SKIP — set to skip installation entirely
+#     RESQ_DEV_REF             — git ref for raw hook fetch (default: main)
+#     GIT_HOOKS_SKIP           — set to skip installation entirely
+#     YES=1                    — auto-accept the local-hook scaffold prompt
+#     RESQ_SKIP_LOCAL_SCAFFOLD — set to opt out of the local-hook prompt
 
 set -eu
 
@@ -63,8 +65,41 @@ printf '      Bypass once:        git commit --no-verify\n' >&2
 printf '      Disable all hooks:  export GIT_HOOKS_SKIP=1\n' >&2
 printf '      Add repo logic:     %s/local-<hook-name>\n' "$HOOKS_DIR" >&2
 
-if ! command -v resq >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/resq" ]; then
+RESQ_BIN=""
+if command -v resq >/dev/null 2>&1; then
+    RESQ_BIN="resq"
+elif [ -x "$HOME/.cargo/bin/resq" ]; then
+    RESQ_BIN="$HOME/.cargo/bin/resq"
+fi
+
+if [ -z "$RESQ_BIN" ]; then
     printf 'warn  resq backend not found. Hooks will soft-skip until you install it:\n' >&2
     printf '      nix develop    (if your flake provides it)\n' >&2
     printf '      cargo install --git https://github.com/resq-software/crates resq-cli\n' >&2
+    exit 0
 fi
+
+# Offer to scaffold a per-repo local-pre-push if none exists yet and resq
+# supports the scaffold subcommand. Skipped silently when the resq binary
+# pre-dates the subcommand or the user opts out.
+if [ -f "$HOOKS_DIR/local-pre-push" ] || [ -n "${RESQ_SKIP_LOCAL_SCAFFOLD:-}" ]; then
+    exit 0
+fi
+if ! "$RESQ_BIN" dev scaffold-local-hook --help >/dev/null 2>&1; then
+    exit 0
+fi
+
+answer=""
+if [ "${YES:-0}" = "1" ]; then
+    answer="y"
+elif [ -e /dev/tty ]; then
+    printf 'info  Scaffold a repo-specific local-pre-push (auto-detect kind)? [y/N] ' >&2
+    read -r answer < /dev/tty
+fi
+
+case "$answer" in
+    [yY]|[yY][eE][sS])
+        (cd "$TARGET_ROOT" && "$RESQ_BIN" dev scaffold-local-hook --kind auto) \
+            || printf 'warn  scaffold-local-hook failed; run it manually with --kind <name>.\n' >&2
+        ;;
+esac
