@@ -1,10 +1,10 @@
 # Copyright 2026 ResQ Software
 # SPDX-License-Identifier: Apache-2.0
 #
-# Run the bats suite over the canonical git-hooks shipped from this repo.
-#
-# Decoupled from hooks-sync.yml on purpose so this file can ship in a
-# different PR without merge conflicts.
+# Run the bats suite over the canonical git hooks. The hook templates live
+# in resq-software/crates; the suite fetches them at bats init time and
+# tests behavior (here-string safety, local-* dispatch, stdin propagation,
+# GIT_HOOKS_SKIP, etc).
 
 name: hooks-tests
 
@@ -12,14 +12,18 @@ on:
   push:
     branches: [main]
     paths:
-      - 'scripts/git-hooks/**'
       - 'tests/hooks/**'
+      - 'scripts/install-hooks.sh'
       - '.github/workflows/hooks-tests.yml'
   pull_request:
     paths:
-      - 'scripts/git-hooks/**'
       - 'tests/hooks/**'
+      - 'scripts/install-hooks.sh'
       - '.github/workflows/hooks-tests.yml'
+  # Weekly — catches canonical-template drift on the crates side that
+  # breaks bats assertions, without requiring a dev-side change to fire.
+  schedule:
+    - cron: '0 7 * * 1'
   workflow_dispatch:
 
 permissions:

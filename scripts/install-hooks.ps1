@@ -3,7 +3,12 @@
 #
 # Install canonical ResQ git hooks into a repository (PowerShell mirror).
 #
-# Usage (local — from dev/):
+# Canonical hook content is owned by resq-software/crates. This installer:
+#   1. Prefers `resq dev install-hooks` when the binary is on PATH (offline,
+#      scaffolds from embedded templates, versioned with the user's resq).
+#   2. Falls back to fetching templates from crates raw.
+#
+# Usage (local):
 #     .\scripts\install-hooks.ps1 [-TargetDir <path>]
 #
 # Usage (curl-piped):
@@ -13,7 +18,7 @@
 [CmdletBinding()]
 param(
     [string]$TargetDir = $PWD,
-    [string]$Ref       = $(if ($env:RESQ_DEV_REF) { $env:RESQ_DEV_REF } else { 'main' })
+    [string]$Ref       = $(if ($env:RESQ_CRATES_REF) { $env:RESQ_CRATES_REF } else { 'master' })
 )
 
 Set-StrictMode -Version Latest
@@ -27,40 +32,68 @@ if (-not $targetRoot) {
 $hooksDir = Join-Path $targetRoot '.git-hooks'
 if (-not (Test-Path $hooksDir)) { New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null }
 
-$hooks = @('pre-commit','commit-msg','prepare-commit-msg','pre-push','post-checkout','post-merge')
+# ── Resolve resq binary ─────────────────────────────────────────────────────
+$resqBin = $null
+$onPath = Get-Command resq -ErrorAction SilentlyContinue
+if ($onPath) {
+    $resqBin = 'resq'
+} elseif (Test-Path (Join-Path $HOME '.cargo/bin/resq')) {
+    $resqBin = Join-Path $HOME '.cargo/bin/resq'
+} elseif (Test-Path (Join-Path $HOME '.cargo/bin/resq.exe')) {
+    $resqBin = Join-Path $HOME '.cargo/bin/resq.exe'
+}
 
-$scriptDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $null }
-$localSource = if ($scriptDir) { Join-Path $scriptDir 'git-hooks' } else { $null }
-
-if ($localSource -and (Test-Path $localSource)) {
-    Write-Host "info  Installing hooks from $localSource" -ForegroundColor Cyan
-    foreach ($h in $hooks) {
-        Copy-Item (Join-Path $localSource $h) (Join-Path $hooksDir $h) -Force
-    }
+# ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
+if ($resqBin) {
+    Write-Host "info  Installing hooks via $resqBin dev install-hooks" -ForegroundColor Cyan
+    Push-Location $targetRoot
+    try { & $resqBin dev install-hooks } finally { Pop-Location }
 } else {
-    $rawBase = "https://raw.githubusercontent.com/resq-software/dev/$Ref/scripts/git-hooks"
+    # ── Path 2: fall back to raw fetch from crates templates ────────────────
+    $hooks = @('pre-commit','commit-msg','prepare-commit-msg','pre-push','post-checkout','post-merge')
+    $rawBase = "https://raw.githubusercontent.com/resq-software/crates/$Ref/crates/resq-cli/templates/git-hooks"
     Write-Host "info  Fetching hooks from $rawBase" -ForegroundColor Cyan
     foreach ($h in $hooks) {
         Invoke-WebRequest -Uri "$rawBase/$h" -OutFile (Join-Path $hooksDir $h) -UseBasicParsing
     }
+    if ($IsLinux -or $IsMacOS) {
+        foreach ($h in $hooks) { & chmod +x (Join-Path $hooksDir $h) }
+    }
+    & git -C $targetRoot config core.hooksPath .git-hooks
 }
-
-# chmod +x on non-Windows.
-if ($IsLinux -or $IsMacOS) {
-    foreach ($h in $hooks) { & chmod +x (Join-Path $hooksDir $h) }
-}
-
-& git -C $targetRoot config core.hooksPath .git-hooks
 
 Write-Host "  ok  ResQ hooks installed in $hooksDir" -ForegroundColor Green
 Write-Host "      Bypass once:        git commit --no-verify"
 Write-Host "      Disable all hooks:  `$env:GIT_HOOKS_SKIP = '1'"
 Write-Host "      Add repo logic:     $hooksDir/local-<hook-name>"
 
-$hasResq = ($null -ne (Get-Command resq -ErrorAction SilentlyContinue)) -or
-           (Test-Path (Join-Path $HOME '.cargo/bin/resq'))
-if (-not $hasResq) {
+if (-not $resqBin) {
     Write-Host "warn  resq backend not found. Hooks will soft-skip until you install it:" -ForegroundColor Yellow
-    Write-Host "      nix develop    (if your flake provides it)"
-    Write-Host "      cargo install --git https://github.com/resq-software/crates resq-cli"
+    Write-Host "      irm https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-resq.sh | sh"
+    Write-Host "      (or) cargo install --git https://github.com/resq-software/crates resq-cli"
+    exit 0
+}
+
+# ── Local-hook scaffold prompt ──────────────────────────────────────────────
+if ((Test-Path (Join-Path $hooksDir 'local-pre-push')) -or $env:RESQ_SKIP_LOCAL_SCAFFOLD) { exit 0 }
+
+# Probe for subcommand support.
+$probe = & $resqBin dev scaffold-local-hook --help 2>&1
+if ($LASTEXITCODE -ne 0) { exit 0 }
+
+$answer = ''
+if ($env:YES -eq '1') {
+    $answer = 'y'
+} elseif ([Environment]::UserInteractive) {
+    $answer = Read-Host 'info  Scaffold a repo-specific local-pre-push (auto-detect kind)? [y/N]'
+}
+
+if ($answer -match '^[yY]') {
+    Push-Location $targetRoot
+    try {
+        & $resqBin dev scaffold-local-hook --kind auto
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'warn  scaffold-local-hook failed; run it manually with --kind <name>.' -ForegroundColor Yellow
+        }
+    } finally { Pop-Location }
 }
