@@ -1,0 +1,18 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Weekly dependency updates, grouped to keep PR noise low.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:17"
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [chore, deps]
+    open-pull-requests-limit: 5
