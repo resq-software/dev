@@ -1,0 +1,88 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Validate canonical git hooks shipped from this repo:
+#   - shellcheck + bash-parse every hook and the installer
+#   - diff scripts/git-hooks/ against the embedded templates in
+#     resq-software/crates (crates/resq-cli/templates/git-hooks/) at master
+#
+# The templates must be byte-identical — they are the single source of
+# truth that installs into every ResQ repo.
+
+name: hooks-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/git-hooks/**'
+      - 'scripts/install-hooks.sh'
+      - '.github/workflows/hooks-sync.yml'
+  pull_request:
+    paths:
+      - 'scripts/git-hooks/**'
+      - 'scripts/install-hooks.sh'
+      - '.github/workflows/hooks-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck + parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          shellcheck -S warning \
+            scripts/install-hooks.sh \
+            scripts/git-hooks/pre-commit \
+            scripts/git-hooks/commit-msg \
+            scripts/git-hooks/prepare-commit-msg \
+            scripts/git-hooks/pre-push \
+            scripts/git-hooks/post-checkout \
+            scripts/git-hooks/post-merge
+
+      - name: bash -n parse check
+        run: |
+          set -e
+          for f in scripts/install-hooks.sh scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg scripts/git-hooks/prepare-commit-msg scripts/git-hooks/pre-push scripts/git-hooks/post-checkout scripts/git-hooks/post-merge; do
+            bash -n "$f"
+          done
+
+  drift-check:
+    name: drift vs crates templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch canonical templates from resq-software/crates@main
+        run: |
+          mkdir -p /tmp/crates-templates
+          for h in pre-commit commit-msg prepare-commit-msg pre-push post-checkout post-merge; do
+            curl -fsSL \
+              "https://raw.githubusercontent.com/resq-software/crates/master/crates/resq-cli/templates/git-hooks/$h" \
+              -o "/tmp/crates-templates/$h"
+          done
+
+      - name: Diff against scripts/git-hooks/
+        run: |
+          rc=0
+          for h in pre-commit commit-msg prepare-commit-msg pre-push post-checkout post-merge; do
+            if ! diff -u "scripts/git-hooks/$h" "/tmp/crates-templates/$h"; then
+              echo "::error file=scripts/git-hooks/$h::drifts from resq-software/crates@master:crates/resq-cli/templates/git-hooks/$h"
+              rc=1
+            fi
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Canonical hook templates in dev/ and crates/ must be byte-identical."
+            echo "::error::Sync them in both repos or retire one copy (Phase 4 of the hardening plan)."
+            exit 1
+          fi
+          echo "✅ All hook templates match crates/resq-cli/templates/git-hooks/"
