@@ -10,7 +10,7 @@ set -euo pipefail
 [ -n "${GIT_HOOKS_SKIP:-}" ] && exit 0
 
 INPUT_FILE="${1:-}"
-PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+$"
+PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .+$"
 
 FIRST_LINE=$(head -1 "$INPUT_FILE")
 SUBJECT=$(echo "$FIRST_LINE" | sed 's/^\[[A-Z][A-Z]*-[0-9]*\] //')
