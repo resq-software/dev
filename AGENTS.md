@@ -19,7 +19,10 @@ scripts/
   install-hooks.sh — Installs canonical git hooks into a repo (local or curl-piped)
   install-hooks.ps1 — PowerShell mirror
   install-resq.sh — Installs the `resq` CLI binary from GitHub Releases (SHA-verified)
-  git-hooks/      — Canonical hook shims (pre-commit, commit-msg, pre-push, …)
+  # Canonical hook templates are owned by resq-software/crates
+  # (crates/resq-cli/templates/git-hooks/). install-hooks.sh fetches them
+  # from there (or lets `resq dev install-hooks` scaffold offline). No copy
+  # lives in this repo.
   lib/
     log.{sh,ps1}        — Colored log helpers
     platform.{sh,ps1}   — OS / arch detection, command_exists
@@ -58,10 +61,16 @@ shellcheck install.sh  # Lint the bash script
 
 ## Git hooks
 
-Canonical hooks live in `scripts/git-hooks/` and are installed into any ResQ
-repo by `scripts/install-hooks.sh` (or `.ps1`). The hooks are thin shims that
-delegate heavy lifting to the `resq` CLI binary from
-[`resq-software/crates`](https://github.com/resq-software/crates):
+Canonical hook templates live in
+[`resq-software/crates`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks)
+and are installed into any ResQ repo by `scripts/install-hooks.sh` (or
+`.ps1`). When the `resq` binary is on PATH, the installer calls
+`resq dev install-hooks` which scaffolds from the embedded templates —
+offline, no network round-trip. Without `resq`, it falls back to fetching
+the templates from the crates repo via raw.githubusercontent.com.
+
+The hooks are thin shims that delegate heavy lifting back to the `resq`
+binary:
 
 - `pre-commit` → `resq pre-commit` (copyright, secrets, audit, polyglot format)
 - `commit-msg` → Conventional Commits + fixup/WIP guard on main/master

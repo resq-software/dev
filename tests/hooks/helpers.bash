@@ -1,19 +1,33 @@
 # shellcheck shell=bash
 # Common helpers for bats tests over the canonical ResQ git hooks.
 #
-# Each test gets a fresh tempdir initialized as a git repo with the canonical
-# hooks copied in. core.hooksPath is set so `git` invokes the hooks naturally.
+# Canonical hook content is owned by resq-software/crates (resq-cli embeds
+# the same templates). This helper fetches them once per bats session from
+# the crates repo via raw, caches them under /tmp, and copies them into
+# each test's fresh repo.
+#
+# Override the source with RESQ_HOOK_SRC_DIR=/path/to/local/templates to
+# test a local change before pushing it to crates.
 
-# Absolute path to the canonical hook templates shipped by this repo.
-HOOK_SRC="${BATS_TEST_DIRNAME}/../../scripts/git-hooks"
+HOOK_SRC_CACHE="${RESQ_HOOK_SRC_DIR:-/tmp/resq-canonical-hooks}"
+HOOK_RAW_BASE="${RESQ_HOOK_RAW_BASE:-https://raw.githubusercontent.com/resq-software/crates/master/crates/resq-cli/templates/git-hooks}"
+
+_ensure_hook_cache() {
+    [ -d "$HOOK_SRC_CACHE" ] && [ -e "$HOOK_SRC_CACHE/pre-commit" ] && return 0
+    mkdir -p "$HOOK_SRC_CACHE"
+    for h in pre-commit commit-msg prepare-commit-msg pre-push post-checkout post-merge; do
+        curl -fsSL "$HOOK_RAW_BASE/$h" -o "$HOOK_SRC_CACHE/$h"
+    done
+}
 
 # Initialize a fresh git repo in $1 with canonical hooks installed.
 init_repo_with_hooks() {
     local dir="$1"
+    _ensure_hook_cache
     git -C "$dir" init -q
     git -C "$dir" -c user.email=t@t.io -c user.name=t commit --allow-empty -m "init" -q
     mkdir -p "$dir/.git-hooks"
-    cp "$HOOK_SRC"/{pre-commit,commit-msg,prepare-commit-msg,pre-push,post-checkout,post-merge} "$dir/.git-hooks/"
+    cp "$HOOK_SRC_CACHE"/{pre-commit,commit-msg,prepare-commit-msg,pre-push,post-checkout,post-merge} "$dir/.git-hooks/"
     chmod +x "$dir/.git-hooks"/*
     git -C "$dir" config core.hooksPath .git-hooks
     git -C "$dir" config user.email t@t.io
