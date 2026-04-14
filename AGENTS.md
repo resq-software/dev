@@ -18,6 +18,7 @@ scripts/
   setup.ps1       — Post-clone environment bootstrap (powershell, mirrors setup.sh)
   install-hooks.sh — Installs canonical git hooks into a repo (local or curl-piped)
   install-hooks.ps1 — PowerShell mirror
+  install-resq.sh — Installs the `resq` CLI binary from GitHub Releases (SHA-verified)
   git-hooks/      — Canonical hook shims (pre-commit, commit-msg, pre-push, …)
   lib/
     log.{sh,ps1}        — Colored log helpers
