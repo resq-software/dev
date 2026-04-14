@@ -99,10 +99,7 @@ fi
 
 case "$answer" in
     [yY]|[yY][eE][sS])
-        if (cd "$TARGET_ROOT" && "$RESQ_BIN" dev scaffold-local-hook --kind auto); then
-            :
-        else
-            printf 'warn  scaffold-local-hook failed; run it manually with --kind <name>.\n' >&2
-        fi
+        (cd "$TARGET_ROOT" && "$RESQ_BIN" dev scaffold-local-hook --kind auto) \
+            || printf 'warn  scaffold-local-hook failed; run it manually with --kind <name>.\n' >&2
         ;;
 esac
