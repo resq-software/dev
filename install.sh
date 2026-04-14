@@ -22,7 +22,9 @@
 #   sh install.sh
 
 # ── Bash re-exec ─────────────────────────────────────────────────────────────
-# When piped to sh, re-exec under bash for pipefail support if available.
+# Local runs (sh install.sh) re-exec under bash for pipefail + better traps.
+# Curl-pipe runs ($0="sh", no file) stay in POSIX sh with `set -eu` — that's
+# the primary UX, so the script must work correctly without bash.
 
 if [ -z "${_RESQ_REEXEC:-}" ] && [ -f "$0" ] && command -v bash >/dev/null 2>&1; then
   export _RESQ_REEXEC=1
@@ -37,17 +39,25 @@ fi
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-SCRIPT_VERSION="0.2.0"
+SCRIPT_VERSION="0.3.0"
 
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-CYAN='\033[0;36m'
-RESET='\033[0m'
+# Disable ANSI when stderr isn't a TTY or NO_COLOR is set (CI, log redirects).
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD='\033[1m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  RED='\033[0;31m'
+  CYAN='\033[0;36m'
+  RESET='\033[0m'
+else
+  BOLD=''; GREEN=''; YELLOW=''; RED=''; CYAN=''; RESET=''
+fi
 
 NIX_INSTALL_URL="https://install.determinate.systems/nix"
 ORG="resq-software"
+
+# Canonical repo list — keep in sync with install.ps1 and README.md.
+VALID_REPOS="programs dotnet-sdk pypi crates npm vcpkg landing docs"
 
 # ── Utility functions (all log to stderr) ────────────────────────────────────
 
@@ -105,6 +115,7 @@ require_version() {
 # Bypassed when YES=1 environment variable is set.
 confirm() {
   if [ "${YES:-0}" = "1" ]; then return 0; fi
+  if [ ! -e /dev/tty ]; then return 1; fi
   printf "%s [y/N] " "$1" >&2
   read -r _confirm_answer < /dev/tty
   case "$_confirm_answer" in
@@ -118,11 +129,26 @@ confirm() {
 detect_platform() {
   OS="$(uname -s)"
   ARCH="$(uname -m)"
+  IS_WSL=0
+  DISTRO="unknown"
   case "$OS" in
-    Linux|Darwin) ;;
-    *) fail "Unsupported OS: $OS. ResQ requires Linux or macOS." ;;
+    Linux)
+      if [ -r /proc/version ] && grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+        IS_WSL=1
+      fi
+      if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        DISTRO="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-unknown}")"
+      fi
+      ;;
+    Darwin) DISTRO="macos" ;;
+    *) fail "Unsupported OS: $OS. Linux/macOS only — Windows users: use install.ps1 or WSL." ;;
   esac
-  info "Detected $OS ($ARCH)"
+  if [ "$IS_WSL" = "1" ]; then
+    info "Detected WSL/$DISTRO ($ARCH)"
+  else
+    info "Detected $OS/$DISTRO ($ARCH)"
+  fi
 }
 
 check_git() {
@@ -132,6 +158,36 @@ check_git() {
   _git_ver="$(git --version | cut -d' ' -f3)"
   ok "git $_git_ver"
   require_version "git" "$_git_ver" "2.0" "https://git-scm.com/downloads"
+}
+
+install_gh_apt() {
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  sudo apt-get update && sudo apt-get install -y gh
+}
+
+install_gh_linux() {
+  # Prefer distro ID; fall back to probing package managers for unknowns.
+  case "$DISTRO" in
+    ubuntu|debian|linuxmint|pop|raspbian) install_gh_apt ;;
+    fedora|rhel|centos|rocky|almalinux) sudo dnf install -y gh ;;
+    arch|manjaro|endeavouros|cachyos) sudo pacman -S --noconfirm github-cli ;;
+    opensuse*|sles|suse) sudo zypper install -y gh ;;
+    alpine) sudo apk add --no-cache github-cli ;;
+    void) sudo xbps-install -Sy github-cli ;;
+    *)
+      if   has apt-get; then install_gh_apt
+      elif has dnf;     then sudo dnf install -y gh
+      elif has pacman;  then sudo pacman -S --noconfirm github-cli
+      elif has zypper;  then sudo zypper install -y gh
+      elif has apk;     then sudo apk add --no-cache github-cli
+      elif has xbps-install; then sudo xbps-install -Sy github-cli
+      else fail "Cannot auto-install gh on '$DISTRO'. Install manually: https://cli.github.com"
+      fi
+      ;;
+  esac
 }
 
 install_gh() {
@@ -145,21 +201,7 @@ install_gh() {
           fail "Install Homebrew first (https://brew.sh) or install gh manually"
         fi
         ;;
-      Linux)
-        if has apt-get; then
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y gh
-        elif has dnf; then
-          sudo dnf install -y gh
-        elif has pacman; then
-          sudo pacman -S --noconfirm github-cli
-        else
-          fail "Cannot auto-install gh. Install manually: https://cli.github.com"
-        fi
-        ;;
+      Linux) install_gh_linux ;;
     esac
   fi
   _gh_ver="$(gh --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
@@ -195,13 +237,40 @@ install_nix() {
 
   if has nix; then
     ok "nix $(nix --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    check_nix_flakes
   else
     warn "Nix installed but not in PATH. Restart your shell and re-run this script."
     exit 0
   fi
 }
 
+# Confirm nix-command + flakes are enabled — `nix develop` is a no-go without them.
+# The Determinate installer enables both by default; pre-existing installs often don't.
+check_nix_flakes() {
+  if nix --extra-experimental-features 'nix-command flakes' \
+       flake --help >/dev/null 2>&1; then
+    return 0
+  fi
+  warn "Nix flakes not enabled — 'nix develop' will fail."
+  warn "  Add to ~/.config/nix/nix.conf:  experimental-features = nix-command flakes"
+}
+
 choose_repo() {
+  # Honour REPO=<name> for unattended installs (CI, provisioning).
+  if [ -n "${REPO:-}" ]; then
+    for _r in $VALID_REPOS; do
+      if [ "$_r" = "$REPO" ]; then
+        info "Using REPO=$REPO from environment"
+        return 0
+      fi
+    done
+    fail "Invalid REPO='$REPO'. Valid: $VALID_REPOS"
+  fi
+
+  if [ ! -e /dev/tty ]; then
+    fail "No TTY for interactive prompt. Set REPO=<name> to run unattended. Valid: $VALID_REPOS"
+  fi
+
   printf "\n${BOLD}  Which repo do you want to work on?${RESET}\n\n" >&2
   printf "  ${CYAN} 1${RESET}  programs      Solana/Anchor on-chain programs\n" >&2
   printf "  ${CYAN} 2${RESET}  dotnet-sdk    .NET client libraries\n" >&2
@@ -233,7 +302,9 @@ clone_repo() {
   if [ -d "$TARGET_DIR/.git" ]; then
     if confirm "$TARGET_DIR already exists — pull latest?"; then
       info "Pulling latest changes..."
-      git -C "$TARGET_DIR" pull --ff-only 2>/dev/null || true
+      if ! git -C "$TARGET_DIR" pull --ff-only; then
+        warn "Fast-forward pull failed in $TARGET_DIR — resolve manually"
+      fi
     fi
   else
     info "Cloning $ORG/$REPO into $TARGET_DIR"
@@ -244,15 +315,19 @@ clone_repo() {
 }
 
 post_clone_setup() {
-  if [ -f "$TARGET_DIR/flake.nix" ]; then
+  if [ -f "$TARGET_DIR/flake.nix" ] && has nix; then
     info "Nix flake detected — building dev environment (first run may take a few minutes)..."
-    nix develop "$TARGET_DIR" --command echo "Environment ready" 2>/dev/null || true
+    if ! nix develop "$TARGET_DIR" --command true; then
+      warn "nix develop failed — cd into $TARGET_DIR and run 'nix develop' to see errors"
+    fi
   fi
 
-  if [ -f "$TARGET_DIR/tools/scripts/setup-hooks.sh" ]; then
-    info "Setting up git hooks..."
-    (cd "$TARGET_DIR" && bash tools/scripts/setup-hooks.sh 2>/dev/null) || true
+  info "Installing canonical ResQ git hooks..."
+  _hooks_url="https://raw.githubusercontent.com/$ORG/dev/main/scripts/install-hooks.sh"
+  if (cd "$TARGET_DIR" && curl -fsSL "$_hooks_url" | sh); then
     ok "Git hooks configured"
+  else
+    warn "Hook install failed — re-run: cd $TARGET_DIR && curl -fsSL $_hooks_url | sh"
   fi
 }
 

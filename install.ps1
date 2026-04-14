@@ -20,14 +20,23 @@
 #   .\install.ps1
 
 #Requires -Version 5.1
+[CmdletBinding()]
+param(
+    # Pre-select a repo for unattended runs. Also honours $env:REPO.
+    [string]$Repo = $env:REPO
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-$ScriptVersion  = '0.2.0'
+$ScriptVersion  = '0.3.0'
 $Org            = 'resq-software'
 $NixInstallUrl  = 'https://install.determinate.systems/nix'
+
+# Canonical repo list — keep in sync with install.sh and README.md.
+$ValidRepos = @('programs','dotnet-sdk','pypi','crates','npm','vcpkg','landing','docs')
 
 # ── Platform flag ────────────────────────────────────────────────────────────
 
@@ -71,9 +80,15 @@ function Test-MinVersion {
     }
 }
 
+function Test-Interactive {
+    # User-interactive AND a real input stream — rules out CI, piped iex, etc.
+    return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+}
+
 function Confirm-Action {
     param([string]$Message)
     if ($env:YES -eq '1') { return $true }
+    if (-not (Test-Interactive)) { return $false }
     $answer = Read-Host "$Message [y/N]"
     return ($answer -match '^[yY]([eE][sS])?$')
 }
@@ -201,6 +216,7 @@ function Install-Nix {
     if (Test-Command 'nix') {
         $nixVer = ((nix --version 2>$null) -replace '[^0-9.]', '').Trim('.')
         Write-Ok "nix $nixVer"
+        Test-NixFlakes
     }
     elseif (-not $IsNativeWindows) {
         Write-Warn 'Nix installed but not in PATH. Restart your shell and re-run this script.'
@@ -208,7 +224,31 @@ function Install-Nix {
     }
 }
 
+function Test-NixFlakes {
+    # `nix develop` requires nix-command + flakes. Determinate enables both;
+    # pre-existing nix installs often don't.
+    & nix --extra-experimental-features 'nix-command flakes' flake --help *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Nix flakes not enabled — 'nix develop' will fail."
+        Write-Warn "  Add to ~/.config/nix/nix.conf:  experimental-features = nix-command flakes"
+    }
+}
+
 function Select-Repo {
+    # Honour -Repo / $env:REPO for unattended runs.
+    if ($Repo) {
+        if ($ValidRepos -notcontains $Repo) {
+            Write-Fail "Invalid -Repo '$Repo'. Valid: $($ValidRepos -join ', ')"
+        }
+        $script:Repo = $Repo
+        Write-Info "Using Repo=$Repo from parameter/env"
+        return
+    }
+
+    if (-not (Test-Interactive)) {
+        Write-Fail "No interactive host for prompt. Use -Repo <name> or `$env:REPO to run unattended. Valid: $($ValidRepos -join ', ')"
+    }
+
     Write-Host ''
     Write-Host '  Which repo do you want to work on?' -ForegroundColor White
     Write-Host ''
@@ -257,19 +297,24 @@ function Clone-Repo {
 }
 
 function Initialize-Repo {
-    if (Test-Path (Join-Path $script:TargetDir 'flake.nix')) {
-        if (Test-Command 'nix') {
-            Write-Info 'Nix flake detected — building dev environment (first run may take a few minutes)...'
-            nix develop $script:TargetDir --command echo 'Environment ready' 2>$null
+    if ((Test-Path (Join-Path $script:TargetDir 'flake.nix')) -and (Test-Command 'nix')) {
+        Write-Info 'Nix flake detected — building dev environment (first run may take a few minutes)...'
+        & nix develop $script:TargetDir --command true
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "nix develop failed — cd into $($script:TargetDir) and run 'nix develop' to see errors"
         }
     }
 
-    $hookScript = Join-Path $script:TargetDir 'tools/scripts/setup-hooks.sh'
-    if (Test-Path $hookScript) {
-        Write-Info 'Setting up git hooks...'
+    Write-Info 'Installing canonical ResQ git hooks...'
+    $hooksUrl = "https://raw.githubusercontent.com/$Org/dev/main/scripts/install-hooks.ps1"
+    try {
+        $script = Invoke-RestMethod -Uri $hooksUrl -UseBasicParsing
+        $sb = [ScriptBlock]::Create($script)
         Push-Location $script:TargetDir
-        try { bash tools/scripts/setup-hooks.sh 2>$null } catch { } finally { Pop-Location }
+        try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
         Write-Ok 'Git hooks configured'
+    } catch {
+        Write-Warn "Hook install failed — re-run:  cd $($script:TargetDir); irm $hooksUrl | iex"
     }
 }
 

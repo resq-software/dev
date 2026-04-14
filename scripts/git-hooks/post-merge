@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Canonical ResQ post-merge shim — source: resq-software/dev.
+# Notifies when lock files change after a merge.
+
+set -euo pipefail
+
+[ -n "${GIT_HOOKS_SKIP:-}" ] && exit 0
+
+CHANGED=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null || true)
+
+echo "$CHANGED" | grep -q "^Cargo\.lock$"   && echo "📦 Cargo.lock changed after merge — run: cargo build"
+echo "$CHANGED" | grep -q "^bun\.lockb\?$"  && echo "📦 bun.lock changed after merge — run: bun install"
+echo "$CHANGED" | grep -q "^uv\.lock$"      && echo "📦 uv.lock changed after merge — run: uv sync"
+echo "$CHANGED" | grep -q "^flake\.lock$"   && echo "📦 flake.lock changed after merge — exit and re-enter: nix develop"
+
+LOCAL_HOOK="$(git rev-parse --show-toplevel)/.git-hooks/local-post-merge"
+if [ -x "$LOCAL_HOOK" ]; then
+    exec "$LOCAL_HOOK" "$@"
+fi
+
+exit 0

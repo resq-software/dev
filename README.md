@@ -31,7 +31,6 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | Repo | What | Languages |
 |---|---|---|
 | [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
-| [`resq-proto`](https://github.com/resq-software/resq-proto) | Shared Protobuf definitions | Protobuf |
 | [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
 | [`pypi`](https://github.com/resq-software/pypi) | Python packages (MCP + DSA) | Python |
 | [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA) | Rust |
