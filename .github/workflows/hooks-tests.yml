@@ -1,0 +1,45 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Run the bats suite over the canonical git-hooks shipped from this repo.
+#
+# Decoupled from hooks-sync.yml on purpose so this file can ship in a
+# different PR without merge conflicts.
+
+name: hooks-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/git-hooks/**'
+      - 'tests/hooks/**'
+      - '.github/workflows/hooks-tests.yml'
+  pull_request:
+    paths:
+      - 'scripts/git-hooks/**'
+      - 'tests/hooks/**'
+      - '.github/workflows/hooks-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    name: bats
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y bats
+
+      - name: Run hook test suite
+        run: bats tests/hooks/
+
+      - name: Print bats version (diagnostic)
+        if: always()
+        run: bats --version
