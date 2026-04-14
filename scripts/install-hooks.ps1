@@ -44,10 +44,14 @@ if ($onPath) {
 }
 
 # ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
+# Prefer the new `hooks install` path; fall back to `dev install-hooks`
+# for binaries built before resq-software/crates#60.
 if ($resqBin) {
-    Write-Host "info  Installing hooks via $resqBin dev install-hooks" -ForegroundColor Cyan
+    & $resqBin hooks install --help *> $null
+    $installArgs = if ($LASTEXITCODE -eq 0) { @('hooks', 'install') } else { @('dev', 'install-hooks') }
+    Write-Host "info  Installing hooks via $resqBin $($installArgs -join ' ')" -ForegroundColor Cyan
     Push-Location $targetRoot
-    try { & $resqBin dev install-hooks } finally { Pop-Location }
+    try { & $resqBin @installArgs } finally { Pop-Location }
 } else {
     # ── Path 2: fall back to raw fetch from crates templates ────────────────
     $hooks = @('pre-commit','commit-msg','prepare-commit-msg','pre-push','post-checkout','post-merge')
@@ -77,9 +81,15 @@ if (-not $resqBin) {
 # ── Local-hook scaffold prompt ──────────────────────────────────────────────
 if ((Test-Path (Join-Path $hooksDir 'local-pre-push')) -or $env:RESQ_SKIP_LOCAL_SCAFFOLD) { exit 0 }
 
-# Probe for subcommand support.
-$probe = & $resqBin dev scaffold-local-hook --help 2>&1
-if ($LASTEXITCODE -ne 0) { exit 0 }
+# Probe for subcommand support; prefer the new path.
+& $resqBin hooks scaffold-local --help *> $null
+if ($LASTEXITCODE -eq 0) {
+    $scaffoldArgs = @('hooks', 'scaffold-local')
+} else {
+    & $resqBin dev scaffold-local-hook --help *> $null
+    if ($LASTEXITCODE -ne 0) { exit 0 }
+    $scaffoldArgs = @('dev', 'scaffold-local-hook')
+}
 
 $answer = ''
 if ($env:YES -eq '1') {
@@ -91,9 +101,9 @@ if ($env:YES -eq '1') {
 if ($answer -match '^[yY]') {
     Push-Location $targetRoot
     try {
-        & $resqBin dev scaffold-local-hook --kind auto
+        & $resqBin @scaffoldArgs --kind auto
         if ($LASTEXITCODE -ne 0) {
-            Write-Host 'warn  scaffold-local-hook failed; run it manually with --kind <name>.' -ForegroundColor Yellow
+            Write-Host 'warn  scaffold-local failed; run it manually with --kind <name>.' -ForegroundColor Yellow
         }
     } finally { Pop-Location }
 }

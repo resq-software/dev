@@ -49,9 +49,17 @@ elif [ -x "$HOME/.cargo/bin/resq" ]; then
 fi
 
 # ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
+# Prefer the new `hooks install` path; fall back to `dev install-hooks` for
+# binaries built before resq-software/crates#60.
 if [ -n "$RESQ_BIN" ]; then
-    printf 'info  Installing hooks via %s dev install-hooks\n' "$RESQ_BIN" >&2
-    (cd "$TARGET_ROOT" && "$RESQ_BIN" dev install-hooks)
+    if "$RESQ_BIN" hooks install --help >/dev/null 2>&1; then
+        install_cmd="hooks install"
+    else
+        install_cmd="dev install-hooks"
+    fi
+    printf 'info  Installing hooks via %s %s\n' "$RESQ_BIN" "$install_cmd" >&2
+    # shellcheck disable=SC2086
+    (cd "$TARGET_ROOT" && "$RESQ_BIN" $install_cmd)
 else
     # ── Path 2: fall back to raw fetch from crates templates ────────────────
     HOOKS="pre-commit commit-msg prepare-commit-msg pre-push post-checkout post-merge"
@@ -82,7 +90,14 @@ fi
 if [ -f "$HOOKS_DIR/local-pre-push" ] || [ -n "${RESQ_SKIP_LOCAL_SCAFFOLD:-}" ]; then
     exit 0
 fi
-if ! "$RESQ_BIN" dev scaffold-local-hook --help >/dev/null 2>&1; then
+# Probe for the new `hooks scaffold-local` path first; fall back to the
+# legacy `dev scaffold-local-hook` for older binaries. Skip entirely if
+# neither is available (very old resq).
+if "$RESQ_BIN" hooks scaffold-local --help >/dev/null 2>&1; then
+    scaffold_cmd="hooks scaffold-local"
+elif "$RESQ_BIN" dev scaffold-local-hook --help >/dev/null 2>&1; then
+    scaffold_cmd="dev scaffold-local-hook"
+else
     exit 0
 fi
 
@@ -96,7 +111,8 @@ fi
 
 case "$answer" in
     [yY]|[yY][eE][sS])
-        (cd "$TARGET_ROOT" && "$RESQ_BIN" dev scaffold-local-hook --kind auto) \
-            || printf 'warn  scaffold-local-hook failed; run it manually with --kind <name>.\n' >&2
+        # shellcheck disable=SC2086
+        (cd "$TARGET_ROOT" && "$RESQ_BIN" $scaffold_cmd --kind auto) \
+            || printf 'warn  scaffold-local failed; run it manually with --kind <name>.\n' >&2
         ;;
 esac
