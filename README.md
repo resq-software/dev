@@ -10,18 +10,28 @@
 
 ---
 
-## ⚡ What happens
+## ⚡ Onboarding in one curl
+
+```bash
+# Default clone target is ~/resq; override with RESQ_DIR=...
+curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
+```
+
+What happens, in order:
 
 1. Installs `gh` (GitHub CLI) if missing
 2. Authenticates with GitHub
 3. Installs [Nix](https://nixos.org) via the [Determinate Systems installer](https://github.com/DeterminateSystems/nix-installer) for reproducible toolchains
 4. Lets you choose which repo to clone
 5. Runs `nix develop` to build the dev environment
-6. Configures git hooks automatically
+6. Installs the canonical git hooks (delegating to `resq pre-commit`)
+7. Offers to scaffold a repo-type-specific `local-pre-push` (auto-detects Rust / Python / Node / .NET / C++ / Nix)
+
+Run unattended (CI / provisioning):
 
 ```bash
-# Change clone directory (default: ~/resq)
-RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
+REPO=npm YES=1 RESQ_DIR=/srv/work \
+  curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
 ```
 
 ---
@@ -33,14 +43,33 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
 | [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
 | [`pypi`](https://github.com/resq-software/pypi) | Python packages (MCP + DSA) | Python |
-| [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA) | Rust |
+| [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA + `resq` binary) | Rust |
 | [`npm`](https://github.com/resq-software/npm) | TypeScript packages (UI + DSA) | TypeScript |
 | [`vcpkg`](https://github.com/resq-software/vcpkg) | C++ libraries | C++ |
+| [`viz`](https://github.com/resq-software/viz) | Visualization library (.NET) | C# |
 | [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
 | [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
-| [`dev`](https://github.com/resq-software/dev) | This repo — in·stall scripts and onboarding | Shell |
+| [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell / PowerShell |
 
 Public repos sync to the monorepo automatically.
+
+---
+
+## 🛠 Standalone scripts
+
+Each script can be run on its own without going through the full onboarding flow.
+
+| Script | Use case | Bootstrap |
+|---|---|---|
+| `install.sh` / `install.ps1` | Full onboarding — installs prereqs, clones a repo, sets up dev env + hooks | `curl -fsSL .../install.sh \| sh` |
+| `install-hooks.sh` / `install-hooks.ps1` | Drop the canonical git hooks into any repo. Asks to scaffold `local-pre-push` if `resq` is on PATH | `cd <repo> && curl -fsSL .../install-hooks.sh \| sh` |
+| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git` if no release asset matches the host platform | `curl -fsSL .../install-resq.sh \| sh` |
+
+Common env vars across all of them:
+- `RESQ_DEV_REF=<sha\|tag>` — pin to a specific revision instead of rolling `main`
+- `YES=1` — skip prompts (CI / provisioning)
+- `GIT_HOOKS_SKIP=1` — disable installed hooks for a session
+- `RESQ_SKIP_LOCAL_SCAFFOLD=1` — opt out of the `local-pre-push` scaffold prompt
 
 ---
 
@@ -54,6 +83,7 @@ Public repos sync to the monorepo automatically.
 | crates | Rust | `cargo build` |
 | npm | TypeScript | `bun install` |
 | vcpkg | C++ | `cmake --preset default` |
+| viz | C# / .NET 9 | `dotnet restore` |
 | landing | Next.js | `bun install && bun dev` |
 | docs | MDX / Mintlify | `mintlify dev` |
 
@@ -199,9 +229,27 @@ Everything is pinned via Nix flakes. No "works on my machine" issues.
 | Protobuf | `buf`, `protoc` |
 | Solana | `solana-cli`, `anchor` |
 
-## ✅ Quality gates
+## ✅ Quality gates — canonical git hooks
 
-Git hooks enforce formatting, linting, secret scanning, and license headers on every commit. Each repo's `AGENTS.md` documents its specific checks.
+Six hook shims live in [`scripts/git-hooks/`](scripts/git-hooks/) and ship with `install-hooks.sh`. They delegate logic to the [`resq`](https://github.com/resq-software/crates) binary so updates roll out via a `cargo install --git` (or `install-resq.sh`) instead of by editing every repo.
+
+| Hook | What it gates |
+|---|---|
+| `pre-commit` | `resq pre-commit` — copyright, secrets, audit, polyglot format |
+| `commit-msg` | Conventional Commits + `!` marker; blocks `WIP:` / `fixup!` / `squash!` on main |
+| `prepare-commit-msg` | Prepends `[TICKET-123]` from branch name |
+| `pre-push` | Force-push guard, branch-naming convention (`feat/`, `fix/`, …, `changeset-release/*` allowed) |
+| `post-checkout` / `post-merge` | Notifies on lock-file changes (Cargo, bun, uv, flake) |
+
+Each hook then dispatches to `.git-hooks/local-<hook-name>` (if executable) — the **only** place a repo commits hook customization. Generate one with the right language template:
+
+```bash
+resq dev scaffold-local-hook --kind auto    # detects rust/python/node/dotnet/cpp/nix
+```
+
+`resq hooks doctor` reports drift, `resq hooks update` re-syncs from the embedded canonical, `resq hooks status` prints a one-line shell-friendly summary.
+
+The same content lives in three places (`scripts/git-hooks/` here, `crates/resq-cli/templates/git-hooks/` in the `resq` binary, `crates/.git-hooks/` in the crates repo). All three are kept byte-identical by `hooks-sync.yml` workflows in both `dev/` and `crates/`. Bats + Rust integration tests cover the hook behavior end-to-end.
 
 ## 📄 License
 
