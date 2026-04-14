@@ -21,7 +21,7 @@ scripts/
   install-resq.sh — Installs the `resq` CLI binary from GitHub Releases (SHA-verified)
   # Canonical hook templates are owned by resq-software/crates
   # (crates/resq-cli/templates/git-hooks/). install-hooks.sh fetches them
-  # from there (or lets `resq dev install-hooks` scaffold offline). No copy
+  # from there (or lets `resq hooks install` scaffold offline). No copy
   # lives in this repo.
   lib/
     log.{sh,ps1}        — Colored log helpers
@@ -65,7 +65,7 @@ Canonical hook templates live in
 [`resq-software/crates`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks)
 and are installed into any ResQ repo by `scripts/install-hooks.sh` (or
 `.ps1`). When the `resq` binary is on PATH, the installer calls
-`resq dev install-hooks` which scaffolds from the embedded templates —
+`resq hooks install` which scaffolds from the embedded templates —
 offline, no network round-trip. Without `resq`, it falls back to fetching
 the templates from the crates repo via raw.githubusercontent.com.
 

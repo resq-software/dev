@@ -233,7 +233,7 @@ Everything is pinned via Nix flakes. No "works on my machine" issues.
 
 Six hook shims live in [`resq-software/crates`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks) — embedded in the `resq` binary *and* served at a stable raw URL. `install-hooks.sh` picks the best path automatically:
 
-1. **`resq` on PATH** → calls `resq dev install-hooks`, which scaffolds the 6 canonical hooks from the templates embedded in the binary. Offline, versioned with the installed `resq`.
+1. **`resq` on PATH** → calls `resq hooks install`, which scaffolds the 6 canonical hooks from the templates embedded in the binary. Offline, versioned with the installed `resq`.
 2. **No `resq`** → falls back to `curl` from `resq-software/crates/master/.../templates/git-hooks/`.
 
 The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so updates roll out via `cargo install --git` (or `install-resq.sh`) without editing every repo.
@@ -249,12 +249,12 @@ The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so
 Each hook then dispatches to `.git-hooks/local-<hook-name>` (if executable) — the **only** place a repo commits hook customization. Generate one with the right language template:
 
 ```bash
-resq dev scaffold-local-hook --kind auto    # detects rust/python/node/dotnet/cpp/nix
+resq hooks scaffold-local --kind auto    # detects rust/python/node/dotnet/cpp/nix
 ```
 
 `resq hooks doctor` reports drift, `resq hooks update` re-syncs from the embedded canonical, `resq hooks status` prints a one-line shell-friendly summary.
 
-The canonical content lives in exactly one place: [`crates/resq-cli/templates/git-hooks/`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks). The crates repo's own `.git-hooks/` (for dog-fooding) is kept identical via `hooks-sync.yml`. The `dev/` repo used to ship a third copy and was retired in Phase 4 — `install-hooks.sh` now fetches from the crates source (or lets `resq dev install-hooks` do it offline). Bats + Rust integration tests cover the hook behavior end-to-end.
+The canonical content lives in exactly one place: [`crates/resq-cli/templates/git-hooks/`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks). The crates repo's own `.git-hooks/` (for dog-fooding) is kept identical via `hooks-sync.yml`. The `dev/` repo used to ship a third copy and was retired in Phase 4 — `install-hooks.sh` now fetches from the crates source (or lets `resq hooks install` do it offline). Bats + Rust integration tests cover the hook behavior end-to-end.
 
 ## 📄 License
 
