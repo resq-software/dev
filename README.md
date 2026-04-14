@@ -30,7 +30,6 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 
 | Repo | What | Languages |
 |---|---|---|
-| [`resQ`](https://github.com/resq-software/resQ) | Platform monorepo | Polyglot (private) |
 | [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
 | [`resq-proto`](https://github.com/resq-software/resq-proto) | Shared Protobuf definitions | Protobuf |
 | [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
@@ -39,7 +38,6 @@ RESQ_DIR=/path/to/workspace curl -fsSL https://raw.githubusercontent.com/resq-so
 | [`npm`](https://github.com/resq-software/npm) | TypeScript packages (UI + DSA) | TypeScript |
 | [`vcpkg`](https://github.com/resq-software/vcpkg) | C++ libraries | C++ |
 | [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
-| [`cms`](https://github.com/curvance-web/cms) | Content management | TypeScript |
 | [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
 | [`dev`](https://github.com/resq-software/dev) | This repo — in·stall scripts and onboarding | Shell |
 
@@ -51,7 +49,6 @@ Public repos sync to the monorepo automatically.
 
 | Repo | Language | Setup |
 |------|----------|-------|
-| resQ | Rust · TS · Python · C++ · C# | `make bootstrap` |
 | programs | Rust / Anchor | `anchor build` |
 | dotnet-sdk | C# / .NET 9 | `dotnet restore` |
 | pypi | Python | `uv sync` |

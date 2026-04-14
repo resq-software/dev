@@ -40,7 +40,6 @@ fi
 SCRIPT_VERSION="0.2.0"
 
 BOLD='\033[1m'
-DIM='\033[2m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
@@ -204,30 +203,26 @@ install_nix() {
 
 choose_repo() {
   printf "\n${BOLD}  Which repo do you want to work on?${RESET}\n\n" >&2
-  printf "  ${CYAN} 1${RESET}  resQ          Platform monorepo ${DIM}(private)${RESET}\n" >&2
-  printf "  ${CYAN} 2${RESET}  programs      Solana/Anchor on-chain programs\n" >&2
-  printf "  ${CYAN} 3${RESET}  dotnet-sdk    .NET client libraries\n" >&2
-  printf "  ${CYAN} 4${RESET}  pypi          Python packages (MCP + DSA)\n" >&2
-  printf "  ${CYAN} 5${RESET}  crates        Rust workspace (CLI + DSA)\n" >&2
-  printf "  ${CYAN} 6${RESET}  npm           TypeScript packages (UI + DSA)\n" >&2
-  printf "  ${CYAN} 7${RESET}  vcpkg         C++ libraries\n" >&2
-  printf "  ${CYAN} 8${RESET}  landing       Marketing site\n" >&2
-  printf "  ${CYAN} 9${RESET}  cms           Content management\n" >&2
-  printf "  ${CYAN}10${RESET}  docs          Documentation site\n" >&2
-  printf "\n  Choice [1-10]: " >&2
+  printf "  ${CYAN} 1${RESET}  programs      Solana/Anchor on-chain programs\n" >&2
+  printf "  ${CYAN} 2${RESET}  dotnet-sdk    .NET client libraries\n" >&2
+  printf "  ${CYAN} 3${RESET}  pypi          Python packages (MCP + DSA)\n" >&2
+  printf "  ${CYAN} 4${RESET}  crates        Rust workspace (CLI + DSA)\n" >&2
+  printf "  ${CYAN} 5${RESET}  npm           TypeScript packages (UI + DSA)\n" >&2
+  printf "  ${CYAN} 6${RESET}  vcpkg         C++ libraries\n" >&2
+  printf "  ${CYAN} 7${RESET}  landing       Marketing site\n" >&2
+  printf "  ${CYAN} 8${RESET}  docs          Documentation site\n" >&2
+  printf "\n  Choice [1-8]: " >&2
   read -r choice < /dev/tty
 
   case "$choice" in
-    1)  REPO="resQ" ;;
-    2)  REPO="programs" ;;
-    3)  REPO="dotnet-sdk" ;;
-    4)  REPO="pypi" ;;
-    5)  REPO="crates" ;;
-    6)  REPO="npm" ;;
-    7)  REPO="vcpkg" ;;
-    8)  REPO="landing" ;;
-    9)  REPO="cms" ;;
-    10) REPO="docs" ;;
+    1)  REPO="programs" ;;
+    2)  REPO="dotnet-sdk" ;;
+    3)  REPO="pypi" ;;
+    4)  REPO="crates" ;;
+    5)  REPO="npm" ;;
+    6)  REPO="vcpkg" ;;
+    7)  REPO="landing" ;;
+    8)  REPO="docs" ;;
     *)  fail "Invalid choice: $choice" ;;
   esac
 }
@@ -263,23 +258,6 @@ post_clone_setup() {
 
 print_repo_info() {
   case "$REPO" in
-    resQ)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "  ${DIM}Toolchain (via Nix)${RESET}\n" >&2
-      printf "    Rust, Node/Bun, Python, .NET, C++, CMake, Protobuf\n\n" >&2
-      printf "  ${DIM}Quality gates (automatic on commit)${RESET}\n" >&2
-      printf "    Copyright headers, secret scanning, formatting (Rust/TS/Python/C++/C#)\n" >&2
-      printf "    OSV vulnerability scan, debug statement detection, file size limits\n\n" >&2
-      printf "  ${DIM}Security workflows (CI)${RESET}\n" >&2
-      printf "    OSV scan, dependency review, CodeQL, secret scanning\n" >&2
-      printf "    AI-powered: secrets analysis, security compliance audits\n\n" >&2
-      printf "  ${DIM}Developer tools${RESET}\n" >&2
-      printf "    resq CLI      — audit, health checks, log viewer, perf monitor\n" >&2
-      printf "    make test     — run all tests across all languages\n" >&2
-      printf "    make build    — build all services\n" >&2
-      printf "    make dev      — start dev servers\n" >&2
-      printf "    make lint     — lint everything\n\n" >&2
-      ;;
     programs)
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
       printf "    Solana CLI, Anchor framework, Rust toolchain\n" >&2
@@ -306,11 +284,6 @@ print_repo_info() {
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
       printf "    C++ toolchain, CMake, clang-format\n" >&2
       printf "    Header-only library: resq-common\n\n" >&2
-      ;;
-    cms)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    TypeScript, pnpm, Wrangler\n" >&2
-      printf "    Deploys to Cloudflare Workers\n\n" >&2
       ;;
     docs)
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2

@@ -212,30 +212,26 @@ function Select-Repo {
     Write-Host ''
     Write-Host '  Which repo do you want to work on?' -ForegroundColor White
     Write-Host ''
-    Write-Host '  ' -NoNewline; Write-Host ' 1' -ForegroundColor Cyan -NoNewline; Write-Host '  resQ          Platform monorepo (private)'
-    Write-Host '  ' -NoNewline; Write-Host ' 2' -ForegroundColor Cyan -NoNewline; Write-Host '  programs      Solana/Anchor on-chain programs'
-    Write-Host '  ' -NoNewline; Write-Host ' 3' -ForegroundColor Cyan -NoNewline; Write-Host '  dotnet-sdk    .NET client libraries'
-    Write-Host '  ' -NoNewline; Write-Host ' 4' -ForegroundColor Cyan -NoNewline; Write-Host '  pypi          Python packages (MCP + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 5' -ForegroundColor Cyan -NoNewline; Write-Host '  crates        Rust workspace (CLI + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 6' -ForegroundColor Cyan -NoNewline; Write-Host '  npm           TypeScript packages (UI + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 7' -ForegroundColor Cyan -NoNewline; Write-Host '  vcpkg         C++ libraries'
-    Write-Host '  ' -NoNewline; Write-Host ' 8' -ForegroundColor Cyan -NoNewline; Write-Host '  landing       Marketing site'
-    Write-Host '  ' -NoNewline; Write-Host ' 9' -ForegroundColor Cyan -NoNewline; Write-Host '  cms           Content management'
-    Write-Host '  ' -NoNewline; Write-Host '10' -ForegroundColor Cyan -NoNewline; Write-Host '  docs          Documentation site'
+    Write-Host '  ' -NoNewline; Write-Host ' 1' -ForegroundColor Cyan -NoNewline; Write-Host '  programs      Solana/Anchor on-chain programs'
+    Write-Host '  ' -NoNewline; Write-Host ' 2' -ForegroundColor Cyan -NoNewline; Write-Host '  dotnet-sdk    .NET client libraries'
+    Write-Host '  ' -NoNewline; Write-Host ' 3' -ForegroundColor Cyan -NoNewline; Write-Host '  pypi          Python packages (MCP + DSA)'
+    Write-Host '  ' -NoNewline; Write-Host ' 4' -ForegroundColor Cyan -NoNewline; Write-Host '  crates        Rust workspace (CLI + DSA)'
+    Write-Host '  ' -NoNewline; Write-Host ' 5' -ForegroundColor Cyan -NoNewline; Write-Host '  npm           TypeScript packages (UI + DSA)'
+    Write-Host '  ' -NoNewline; Write-Host ' 6' -ForegroundColor Cyan -NoNewline; Write-Host '  vcpkg         C++ libraries'
+    Write-Host '  ' -NoNewline; Write-Host ' 7' -ForegroundColor Cyan -NoNewline; Write-Host '  landing       Marketing site'
+    Write-Host '  ' -NoNewline; Write-Host ' 8' -ForegroundColor Cyan -NoNewline; Write-Host '  docs          Documentation site'
     Write-Host ''
-    $choice = Read-Host '  Choice [1-10]'
+    $choice = Read-Host '  Choice [1-8]'
 
     $script:Repo = switch ($choice) {
-        '1'  { 'resQ' }
-        '2'  { 'programs' }
-        '3'  { 'dotnet-sdk' }
-        '4'  { 'pypi' }
-        '5'  { 'crates' }
-        '6'  { 'npm' }
-        '7'  { 'vcpkg' }
-        '8'  { 'landing' }
-        '9'  { 'cms' }
-        '10' { 'docs' }
+        '1' { 'programs' }
+        '2' { 'dotnet-sdk' }
+        '3' { 'pypi' }
+        '4' { 'crates' }
+        '5' { 'npm' }
+        '6' { 'vcpkg' }
+        '7' { 'landing' }
+        '8' { 'docs' }
         default { Write-Fail "Invalid choice: $choice" }
     }
 }
@@ -279,29 +275,6 @@ function Initialize-Repo {
 
 function Show-RepoInfo {
     switch ($script:Repo) {
-        'resQ' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '  Toolchain (via Nix)' -ForegroundColor DarkGray
-            Write-Host '    Rust, Node/Bun, Python, .NET, C++, CMake, Protobuf'
-            Write-Host ''
-            Write-Host '  Quality gates (automatic on commit)' -ForegroundColor DarkGray
-            Write-Host '    Copyright headers, secret scanning, formatting (Rust/TS/Python/C++/C#)'
-            Write-Host '    OSV vulnerability scan, debug statement detection, file size limits'
-            Write-Host ''
-            Write-Host '  Security workflows (CI)' -ForegroundColor DarkGray
-            Write-Host '    OSV scan, dependency review, CodeQL, secret scanning'
-            Write-Host '    AI-powered: secrets analysis, security compliance audits'
-            Write-Host ''
-            Write-Host '  Developer tools' -ForegroundColor DarkGray
-            Write-Host '    resq CLI      — audit, health checks, log viewer, perf monitor'
-            Write-Host '    make test     — run all tests across all languages'
-            Write-Host '    make build    — build all services'
-            Write-Host '    make dev      — start dev servers'
-            Write-Host '    make lint     — lint everything'
-            Write-Host ''
-        }
         'programs' {
             Write-Host ''
             Write-Host '  What''s included:' -ForegroundColor White
@@ -342,14 +315,6 @@ function Show-RepoInfo {
             Write-Host ''
             Write-Host '    C++ toolchain, CMake, clang-format'
             Write-Host '    Header-only library: resq-common'
-            Write-Host ''
-        }
-        'cms' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    TypeScript, pnpm, Wrangler'
-            Write-Host '    Deploys to Cloudflare Workers'
             Write-Host ''
         }
         'docs' {
