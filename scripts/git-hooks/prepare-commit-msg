@@ -17,10 +17,10 @@ esac
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 [ -z "$BRANCH" ] && exit 0
 
-TICKET=$(echo "$BRANCH" | grep -oE '[A-Z]{2,}-[0-9]+' | head -1 || true)
+TICKET=$(grep -oE '[A-Z]{2,}-[0-9]+' <<<"$BRANCH" | head -1 || true)
 if [ -n "$TICKET" ]; then
     COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
-    if ! echo "$COMMIT_MSG" | grep -qF "$TICKET"; then
+    if ! grep -qF -- "$TICKET" <<<"$COMMIT_MSG"; then
         printf '[%s] %s\n' "$TICKET" "$COMMIT_MSG" > "$COMMIT_MSG_FILE"
     fi
 fi
