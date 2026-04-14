@@ -25,18 +25,24 @@ fi
 # ── Force-push guard on main/master ─────────────────────────────────────────
 case "$BRANCH" in
     main|master)
-        while read -r _local_ref local_sha _remote_ref remote_sha; do
-            if [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && \
-               [ "$local_sha"  != "0000000000000000000000000000000000000000" ]; then
-                if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
-                    echo "❌ Force push to $BRANCH is not allowed."
-                    echo "   Override with:  git push --no-verify"
-                    exit 1
+        # Only iterate when git actually gave us refs — an empty $PUSH_REFS
+        # would otherwise feed one blank line through the heredoc and trip
+        # the guard.
+        if [ -n "$PUSH_REFS" ]; then
+            while read -r _local_ref local_sha _remote_ref remote_sha; do
+                [ -z "$local_sha" ] && continue
+                if [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && \
+                   [ "$local_sha"  != "0000000000000000000000000000000000000000" ]; then
+                    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+                        echo "❌ Force push to $BRANCH is not allowed."
+                        echo "   Override with:  git push --no-verify"
+                        exit 1
+                    fi
                 fi
-            fi
-        done <<EOF
+            done <<EOF
 $PUSH_REFS
 EOF
+        fi
         ;;
 esac
 
