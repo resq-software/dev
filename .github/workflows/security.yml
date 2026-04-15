@@ -25,4 +25,5 @@ jobs:
     uses: resq-software/.github/.github/workflows/security-scan.yml@main
     with:
       languages: '["actions"]'
+      enable-semgrep: true
     secrets: inherit
