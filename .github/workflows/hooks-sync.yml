@@ -33,7 +33,7 @@ jobs:
     name: shellcheck + parse
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install shellcheck
         run: sudo apt-get update -y && sudo apt-get install -y shellcheck
@@ -55,7 +55,7 @@ jobs:
     name: smoke — raw-fetch fallback path
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Spin up a throwaway git repo and install hooks
         run: |
