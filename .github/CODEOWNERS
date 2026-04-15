@@ -1,0 +1,8 @@
+# Default owner for everything not matched by a more specific rule.
+*                         @WomB0ComB0
+
+# Installer + canonical git hooks — the blast-radius surface.
+/install.sh               @WomB0ComB0
+/install.ps1              @WomB0ComB0
+/scripts/                 @WomB0ComB0
+/.github/workflows/       @WomB0ComB0
