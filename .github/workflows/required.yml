@@ -1,0 +1,29 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Minimal `required` status-check emitter — placeholder to satisfy the
+# org ruleset `default-branch-baseline` (id 15191038) while
+# language-specific reusable CI for this repo is still pending. Harden
+# this job (add `needs:` on real CI jobs) before the ruleset flips from
+# evaluate to active.
+
+name: required
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  required:
+    name: required
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ok — placeholder until language CI lands"
