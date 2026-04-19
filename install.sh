@@ -469,16 +469,19 @@ install_resq_completions() {
   mkdir -p "$_compl_dir"
   # Capture stderr on failure so the user sees the real reason. Older resq
   # binaries (before v0.2.7) don't know about `completions`; newer ones do.
-  _compl_err="$("$_bin_path" completions "$_shell_name" 2> /tmp/resq-compl-err.$$ > "$_compl_file" && echo ok || echo fail)"
+  # Using mktemp (not /tmp/...$$) so TMPDIR is honoured and we can't collide
+  # with a stale file owned by another user on a shared host.
+  _err_tmp="$(mktemp)"
+  _compl_err="$("$_bin_path" completions "$_shell_name" 2> "$_err_tmp" > "$_compl_file" && echo ok || echo fail)"
   if [ "$_compl_err" = "ok" ] && [ -s "$_compl_file" ]; then
-    rm -f /tmp/resq-compl-err.$$
+    rm -f "$_err_tmp"
     ok "Installed $_shell_name completions to $_compl_file"
     if [ "$_shell_name" = "zsh" ]; then
       info "  zsh: add to ~/.zshrc if not already: fpath+=(\"$_compl_dir\"); autoload -Uz compinit && compinit"
     fi
   else
-    _err_msg="$(head -n 1 /tmp/resq-compl-err.$$ 2>/dev/null)"
-    rm -f "$_compl_file" /tmp/resq-compl-err.$$
+    _err_msg="$(head -n 1 "$_err_tmp" 2>/dev/null)"
+    rm -f "$_compl_file" "$_err_tmp"
     if [ -n "$_err_msg" ]; then
       warn "Failed to generate $_shell_name completions: $_err_msg"
     else
