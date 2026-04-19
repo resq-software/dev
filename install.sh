@@ -57,7 +57,7 @@ NIX_INSTALL_URL="https://install.determinate.systems/nix"
 ORG="resq-software"
 
 # Canonical repo list — keep in sync with install.ps1 and README.md.
-VALID_REPOS="programs dotnet-sdk pypi crates npm vcpkg landing docs"
+VALID_REPOS="programs dotnet-sdk pypi crates npm vcpkg landing docs viz"
 
 # ── Utility functions (all log to stderr) ────────────────────────────────────
 
@@ -280,7 +280,8 @@ choose_repo() {
   printf "  ${CYAN} 6${RESET}  vcpkg         C++ libraries\n" >&2
   printf "  ${CYAN} 7${RESET}  landing       Marketing site\n" >&2
   printf "  ${CYAN} 8${RESET}  docs          Documentation site\n" >&2
-  printf "\n  Choice [1-8]: " >&2
+  printf "  ${CYAN} 9${RESET}  viz           3D visualization (Three.js/Cesium + Unity)\n" >&2
+  printf "\n  Choice [1-9]: " >&2
   read -r choice < /dev/tty
 
   case "$choice" in
@@ -292,6 +293,7 @@ choose_repo() {
     6)  REPO="vcpkg" ;;
     7)  REPO="landing" ;;
     8)  REPO="docs" ;;
+    9)  REPO="viz" ;;
     *)  fail "Invalid choice: $choice" ;;
   esac
 }
@@ -502,6 +504,11 @@ print_repo_info() {
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
       printf "    Mintlify docs site\n" >&2
       printf "    npx mint dev for local preview\n\n" >&2
+      ;;
+    viz)
+      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
+      printf "    Three.js / Cesium web viewers (TypeScript)\n" >&2
+      printf "    Unity 3D viewer (.NET 9, ResQ.Viz.sln)\n\n" >&2
       ;;
   esac
 }
