@@ -338,6 +338,12 @@ function Install-ResqCli {
 
     # Map platform to Rust target triple and archive kind.
     if ($IsNativeWindows) {
+        # release.yml only publishes x86_64 Windows; bail fast on 32-bit rather
+        # than chasing a SHA256SUMS miss later.
+        if ($script:Arch -ne 'x64') {
+            Write-Warn "No resq-cli binary for Windows $($script:Arch) - skipping"
+            return
+        }
         $triple  = 'x86_64-pc-windows-msvc'
         $ext     = 'zip'
         $binName = 'resq.exe'
@@ -466,7 +472,11 @@ function Install-ResqCompletions {
     if (-not (Test-Path $complDir)) { New-Item -ItemType Directory -Path $complDir -Force | Out-Null }
 
     try {
+        # Native exec doesn't throw on non-zero exit even with
+        # ErrorActionPreference='Stop' — check $LASTEXITCODE explicitly so a
+        # corrupt / incompatible binary can't leave an empty completions file.
         & $BinPath completions powershell | Set-Content -Path $complFile -Encoding UTF8
+        if ($LASTEXITCODE -ne 0) { throw "completions generation exited $LASTEXITCODE" }
         Write-Ok "Installed PowerShell completions to $complFile"
         $sourceLine = ". `"$complFile`""
         $profileSourcesIt = (Test-Path $PROFILE) -and ((Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue) -match [regex]::Escape($complFile))
@@ -474,7 +484,8 @@ function Install-ResqCompletions {
             Write-Info "  Add to your `$PROFILE to enable completions in new sessions:  $sourceLine"
         }
     } catch {
-        Write-Warn 'Failed to generate PowerShell completions - skip'
+        Write-Warn "Failed to generate PowerShell completions - skip ($_)"
+        Remove-Item -Path $complFile -ErrorAction SilentlyContinue
     }
 }
 
