@@ -316,8 +316,14 @@ clone_repo() {
 
 post_clone_setup() {
   if [ -f "$TARGET_DIR/flake.nix" ] && has nix; then
-    info "Nix flake detected — building dev environment (first run may take a few minutes)..."
-    if ! nix develop "$TARGET_DIR" --command true; then
+    info "Building Nix dev environment at $TARGET_DIR"
+    info "  (first run downloads ~500 MB – 2 GB; expect 2–5 minutes, no progress bar)"
+    _nix_start="$(date +%s 2>/dev/null || echo 0)"
+    if nix develop "$TARGET_DIR" --command true; then
+      _nix_end="$(date +%s 2>/dev/null || echo 0)"
+      _nix_elapsed=$((_nix_end - _nix_start))
+      ok "Nix dev environment ready (${_nix_elapsed}s)"
+    else
       warn "nix develop failed — cd into $TARGET_DIR and run 'nix develop' to see errors"
     fi
   fi
@@ -328,6 +334,129 @@ post_clone_setup() {
     ok "Git hooks configured"
   else
     warn "Hook install failed — re-run: cd $TARGET_DIR && curl -fsSL $_hooks_url | sh"
+  fi
+}
+
+# Install the `resq` binary from resq-software/crates GitHub Releases. Chooses
+# the tar.gz for the current $OS/$ARCH, verifies SHA256 against the release's
+# SHA256SUMS, and drops the binary into $RESQ_BIN_DIR (default ~/.local/bin).
+# Idempotent: skips when the currently-installed `resq --version` matches the
+# latest release. Skip entirely with SKIP_RESQ_CLI=1.
+install_resq_cli() {
+  if [ "${SKIP_RESQ_CLI:-0}" = "1" ]; then
+    info "SKIP_RESQ_CLI=1 — skipping resq binary install"
+    return 0
+  fi
+
+  case "$OS-$ARCH" in
+    Linux-x86_64)              _triple="x86_64-unknown-linux-gnu" ;;
+    Linux-aarch64|Linux-arm64) _triple="aarch64-unknown-linux-gnu" ;;
+    Darwin-x86_64)             _triple="x86_64-apple-darwin" ;;
+    Darwin-arm64)              _triple="aarch64-apple-darwin" ;;
+    *)
+      warn "No resq-cli binary published for $OS-$ARCH — skipping"
+      return 0
+      ;;
+  esac
+
+  _tag="$(gh release list --repo "$ORG/crates" --limit 40 \
+    --json tagName --jq '.[] | .tagName' 2>/dev/null \
+    | grep -m1 '^resq-cli-v' || true)"
+  if [ -z "$_tag" ]; then
+    warn "No resq-cli release found in $ORG/crates — skipping binary install"
+    return 0
+  fi
+  _expected_ver="$(echo "$_tag" | sed 's/^resq-cli-v//')"
+
+  _bin_dir="${RESQ_BIN_DIR:-$HOME/.local/bin}"
+  _bin_path="$_bin_dir/resq"
+
+  if [ -x "$_bin_path" ]; then
+    _installed_ver="$("$_bin_path" --version 2>/dev/null | awk '{print $NF}')"
+    if [ "$_installed_ver" = "$_expected_ver" ]; then
+      ok "resq $_expected_ver already installed at $_bin_path"
+      install_resq_completions
+      return 0
+    fi
+  fi
+
+  info "Installing resq $_expected_ver for $_triple..."
+  _tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf \"$_tmp\"" EXIT HUP INT QUIT TERM
+
+  _asset="resq-cli-${_tag}-${_triple}.tar.gz"
+  if ! gh release download "$_tag" --repo "$ORG/crates" \
+        --pattern "$_asset" --pattern 'SHA256SUMS' --dir "$_tmp" --clobber >/dev/null 2>&1; then
+    warn "Failed to download $_asset from $_tag — skipping"
+    return 0
+  fi
+
+  # Verify checksum. SHA256SUMS lists every asset; filter to just ours before
+  # feeding to `sha256sum -c` so other missing files don't trigger failures.
+  if ! (cd "$_tmp" && grep -F " $_asset" SHA256SUMS | sha256sum -c --quiet >/dev/null 2>&1); then
+    warn "SHA256 verification failed for $_asset — not installing"
+    return 0
+  fi
+
+  tar -xzf "$_tmp/$_asset" -C "$_tmp"
+  _staging_dir="$_tmp/resq-cli-${_tag}-${_triple}"
+  if [ ! -x "$_staging_dir/resq" ]; then
+    warn "Archive layout unexpected ($_staging_dir/resq missing) — skipping"
+    return 0
+  fi
+
+  mkdir -p "$_bin_dir"
+  install -m 0755 "$_staging_dir/resq" "$_bin_path"
+  ok "Installed $_bin_path"
+
+  case ":$PATH:" in
+    *":$_bin_dir:"*) ;;
+    *) warn "$_bin_dir is not in PATH. Add to your shell rc: export PATH=\"$_bin_dir:\$PATH\"" ;;
+  esac
+
+  install_resq_completions
+}
+
+# Emit shell completion scripts for the user's current shell into the
+# conventional user-local path. Bash / zsh / fish are handled; other shells
+# get a hint to run `resq completions <shell>` manually. Silent-ok if the
+# `resq` binary couldn't be installed.
+install_resq_completions() {
+  _bin_dir="${RESQ_BIN_DIR:-$HOME/.local/bin}"
+  _bin_path="$_bin_dir/resq"
+  if [ ! -x "$_bin_path" ]; then
+    return 0
+  fi
+
+  _shell_name="$(basename "${SHELL:-sh}")"
+  case "$_shell_name" in
+    bash)
+      _compl_dir="$HOME/.local/share/bash-completion/completions"
+      _compl_file="$_compl_dir/resq"
+      ;;
+    zsh)
+      _compl_dir="$HOME/.local/share/zsh/site-functions"
+      _compl_file="$_compl_dir/_resq"
+      ;;
+    fish)
+      _compl_dir="$HOME/.config/fish/completions"
+      _compl_file="$_compl_dir/resq.fish"
+      ;;
+    *)
+      info "Shell completions: run \`resq completions <bash|zsh|fish|elvish|powershell>\` manually"
+      return 0
+      ;;
+  esac
+
+  mkdir -p "$_compl_dir"
+  if "$_bin_path" completions "$_shell_name" > "$_compl_file" 2>/dev/null; then
+    ok "Installed $_shell_name completions to $_compl_file"
+    if [ "$_shell_name" = "zsh" ]; then
+      info "  zsh: add to ~/.zshrc if not already: fpath+=(\"$_compl_dir\"); autoload -Uz compinit && compinit"
+    fi
+  else
+    warn "Failed to generate $_shell_name completions — skip"
   fi
 }
 
@@ -382,6 +511,7 @@ main() {
   choose_repo
   clone_repo
   post_clone_setup
+  install_resq_cli
   print_repo_info
 
   printf "${BOLD}${GREEN}  Ready!${RESET}\n\n" >&2
