@@ -36,7 +36,7 @@ $Org            = 'resq-software'
 $NixInstallUrl  = 'https://install.determinate.systems/nix'
 
 # Canonical repo list — keep in sync with install.sh and README.md.
-$ValidRepos = @('programs','dotnet-sdk','pypi','crates','npm','vcpkg','landing','docs')
+$ValidRepos = @('programs','dotnet-sdk','pypi','crates','npm','vcpkg','landing','docs','viz')
 
 # ── Platform flag ────────────────────────────────────────────────────────────
 
@@ -260,8 +260,9 @@ function Select-Repo {
     Write-Host '  ' -NoNewline; Write-Host ' 6' -ForegroundColor Cyan -NoNewline; Write-Host '  vcpkg         C++ libraries'
     Write-Host '  ' -NoNewline; Write-Host ' 7' -ForegroundColor Cyan -NoNewline; Write-Host '  landing       Marketing site'
     Write-Host '  ' -NoNewline; Write-Host ' 8' -ForegroundColor Cyan -NoNewline; Write-Host '  docs          Documentation site'
+    Write-Host '  ' -NoNewline; Write-Host ' 9' -ForegroundColor Cyan -NoNewline; Write-Host '  viz           3D visualization (Three.js/Cesium + Unity)'
     Write-Host ''
-    $choice = Read-Host '  Choice [1-8]'
+    $choice = Read-Host '  Choice [1-9]'
 
     $script:Repo = switch ($choice) {
         '1' { 'programs' }
@@ -272,6 +273,7 @@ function Select-Repo {
         '6' { 'vcpkg' }
         '7' { 'landing' }
         '8' { 'docs' }
+        '9' { 'viz' }
         default { Write-Fail "Invalid choice: $choice" }
     }
 }
@@ -539,6 +541,14 @@ function Show-RepoInfo {
             Write-Host ''
             Write-Host '    Mintlify docs site'
             Write-Host '    npx mint dev for local preview'
+            Write-Host ''
+        }
+        'viz' {
+            Write-Host ''
+            Write-Host '  What''s included:' -ForegroundColor White
+            Write-Host ''
+            Write-Host '    Three.js / Cesium web viewers (TypeScript)'
+            Write-Host '    Unity 3D viewer (.NET 9, ResQ.Viz.sln)'
             Write-Host ''
         }
     }
