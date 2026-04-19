@@ -298,10 +298,15 @@ function Clone-Repo {
 
 function Initialize-Repo {
     if ((Test-Path (Join-Path $script:TargetDir 'flake.nix')) -and (Test-Command 'nix')) {
-        Write-Info 'Nix flake detected — building dev environment (first run may take a few minutes)...'
+        Write-Info "Building Nix dev environment at $($script:TargetDir)"
+        Write-Info '  (first run downloads ~500 MB - 2 GB; expect 2-5 minutes, no progress bar)'
+        $nixStart = Get-Date
         & nix develop $script:TargetDir --command true
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "nix develop failed — cd into $($script:TargetDir) and run 'nix develop' to see errors"
+        if ($LASTEXITCODE -eq 0) {
+            $elapsed = [int](New-TimeSpan -Start $nixStart -End (Get-Date)).TotalSeconds
+            Write-Ok "Nix dev environment ready (${elapsed}s)"
+        } else {
+            Write-Warn "nix develop failed - cd into $($script:TargetDir) and run 'nix develop' to see errors"
         }
     }
 
@@ -314,7 +319,162 @@ function Initialize-Repo {
         try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
         Write-Ok 'Git hooks configured'
     } catch {
-        Write-Warn "Hook install failed — re-run:  cd $($script:TargetDir); irm $hooksUrl | iex"
+        Write-Warn "Hook install failed - re-run:  cd $($script:TargetDir); irm $hooksUrl | iex"
+    }
+}
+
+# Install the `resq` binary from resq-software/crates GitHub Releases. Chooses
+# the archive for the current platform, verifies SHA256 against the release's
+# SHA256SUMS, and drops the binary into $env:RESQ_BIN_DIR (default:
+# %LOCALAPPDATA%\Programs\resq\bin on Windows, ~/.local/bin on Unix).
+#
+# Idempotent: skips when the currently-installed `resq --version` matches the
+# latest release. Skip entirely with $env:SKIP_RESQ_CLI=1.
+function Install-ResqCli {
+    if ($env:SKIP_RESQ_CLI -eq '1') {
+        Write-Info 'SKIP_RESQ_CLI=1 - skipping resq binary install'
+        return
+    }
+
+    # Map platform to Rust target triple and archive kind.
+    if ($IsNativeWindows) {
+        $triple  = 'x86_64-pc-windows-msvc'
+        $ext     = 'zip'
+        $binName = 'resq.exe'
+        $defaultBinDir = Join-Path $env:LOCALAPPDATA 'Programs\resq\bin'
+    }
+    elseif ($IsMacOS) {
+        $triple  = if ($script:Arch -eq 'arm64') { 'aarch64-apple-darwin' } else { 'x86_64-apple-darwin' }
+        $ext     = 'tar.gz'
+        $binName = 'resq'
+        $defaultBinDir = Join-Path $HOME '.local/bin'
+    }
+    elseif ($IsLinux) {
+        $triple  = if ($script:Arch -in @('aarch64','arm64')) { 'aarch64-unknown-linux-gnu' } else { 'x86_64-unknown-linux-gnu' }
+        $ext     = 'tar.gz'
+        $binName = 'resq'
+        $defaultBinDir = Join-Path $HOME '.local/bin'
+    }
+    else {
+        Write-Warn "No resq-cli binary for $($script:Platform) - skipping"
+        return
+    }
+
+    # Find latest resq-cli-v* tag.
+    $tag = gh release list --repo "$Org/crates" --limit 40 --json tagName --jq '.[] | .tagName' 2>$null |
+           Where-Object { $_ -like 'resq-cli-v*' } |
+           Select-Object -First 1
+    if (-not $tag) {
+        Write-Warn "No resq-cli release found in $Org/crates - skipping binary install"
+        return
+    }
+    $expectedVer = $tag -replace '^resq-cli-v', ''
+
+    $binDir  = if ($env:RESQ_BIN_DIR) { $env:RESQ_BIN_DIR } else { $defaultBinDir }
+    $binPath = Join-Path $binDir $binName
+
+    if (Test-Path $binPath) {
+        try {
+            $installedVer = (& $binPath --version 2>$null) -split '\s+' | Select-Object -Last 1
+        } catch { $installedVer = '' }
+        if ($installedVer -eq $expectedVer) {
+            Write-Ok "resq $expectedVer already installed at $binPath"
+            Install-ResqCompletions -BinPath $binPath
+            return
+        }
+    }
+
+    Write-Info "Installing resq $expectedVer for $triple..."
+    $tmp = New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())) -Force
+    try {
+        $asset = "resq-cli-${tag}-${triple}.${ext}"
+        gh release download $tag --repo "$Org/crates" --pattern $asset --pattern 'SHA256SUMS' --dir $tmp.FullName --clobber 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Failed to download $asset from $tag - skipping"
+            return
+        }
+
+        # Verify SHA256. SHA256SUMS has "<hash>  <filename>" lines; find ours.
+        $sumsFile  = Join-Path $tmp.FullName 'SHA256SUMS'
+        $assetPath = Join-Path $tmp.FullName $asset
+        $expectedRow = (Get-Content $sumsFile) | Where-Object { $_ -match [regex]::Escape($asset) + '$' }
+        if (-not $expectedRow) {
+            Write-Warn "SHA256SUMS missing entry for $asset - not installing"
+            return
+        }
+        $expectedHash = (($expectedRow -split '\s+')[0]).ToLower()
+        $actualHash = (Get-FileHash -Path $assetPath -Algorithm SHA256).Hash.ToLower()
+        if ($expectedHash -ne $actualHash) {
+            Write-Warn "SHA256 verification failed for $asset - not installing"
+            return
+        }
+
+        # Extract. PowerShell ships Expand-Archive for .zip; tar.exe for .tar.gz
+        # is native on Win10+ and on all Unix hosts.
+        if ($ext -eq 'zip') {
+            Expand-Archive -Path $assetPath -DestinationPath $tmp.FullName -Force
+        } else {
+            & tar -xzf $assetPath -C $tmp.FullName
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Failed to extract $asset - skipping"
+                return
+            }
+        }
+
+        # Locate the binary inside the extracted tree (matches install.sh's find).
+        $stagedBin = Get-ChildItem -Path $tmp.FullName -Recurse -Filter $binName | Select-Object -First 1
+        if (-not $stagedBin) {
+            Write-Warn "Archive layout unexpected ($binName missing) - skipping"
+            return
+        }
+
+        if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+        Copy-Item -Path $stagedBin.FullName -Destination $binPath -Force
+        if (-not $IsNativeWindows -and (Test-Command 'chmod')) {
+            & chmod 0755 $binPath
+        }
+        Write-Ok "Installed $binPath"
+
+        # PATH hint.
+        $pathSep = if ($IsNativeWindows) { ';' } else { ':' }
+        if (-not (($env:PATH -split $pathSep) -contains $binDir)) {
+            if ($IsNativeWindows) {
+                Write-Warn "$binDir is not in PATH. Add via Settings > Environment Variables."
+            } else {
+                Write-Warn "$binDir is not in PATH. Add to your shell rc:  export PATH=`"$binDir`:`$PATH`""
+            }
+        }
+
+        Install-ResqCompletions -BinPath $binPath
+    }
+    finally {
+        Remove-Item -Recurse -Force $tmp.FullName -ErrorAction SilentlyContinue
+    }
+}
+
+# Generate PowerShell completions for the freshly-installed resq binary and
+# write them next to $PROFILE. User sources the file from their $PROFILE to
+# enable tab-completion across new sessions.
+function Install-ResqCompletions {
+    param([string]$BinPath)
+    if (-not (Test-Path $BinPath)) { return }
+
+    $profileDir = Split-Path $PROFILE -Parent
+    $complDir   = Join-Path $profileDir 'Completions'
+    $complFile  = Join-Path $complDir   'resq.ps1'
+
+    if (-not (Test-Path $complDir)) { New-Item -ItemType Directory -Path $complDir -Force | Out-Null }
+
+    try {
+        & $BinPath completions powershell | Set-Content -Path $complFile -Encoding UTF8
+        Write-Ok "Installed PowerShell completions to $complFile"
+        $sourceLine = ". `"$complFile`""
+        $profileSourcesIt = (Test-Path $PROFILE) -and ((Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue) -match [regex]::Escape($complFile))
+        if (-not $profileSourcesIt) {
+            Write-Info "  Add to your `$PROFILE to enable completions in new sessions:  $sourceLine"
+        }
+    } catch {
+        Write-Warn 'Failed to generate PowerShell completions - skip'
     }
 }
 
@@ -389,6 +549,7 @@ function Main {
     Select-Repo
     Clone-Repo
     Initialize-Repo
+    Install-ResqCli
     Show-RepoInfo
 
     Write-Host '  Ready!' -ForegroundColor Green
