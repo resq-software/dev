@@ -393,21 +393,30 @@ install_resq_cli() {
   fi
 
   # Verify checksum. SHA256SUMS lists every asset; filter to just ours before
-  # feeding to `sha256sum -c` so other missing files don't trigger failures.
-  if ! (cd "$_tmp" && grep -F " $_asset" SHA256SUMS | sha256sum -c --quiet >/dev/null 2>&1); then
+  # feeding to the checker so other missing files don't trigger failures.
+  # macOS ships `shasum -a 256` but not `sha256sum`; prefer sha256sum when
+  # available and fall back to shasum. `--quiet` is a GNU-only flag, so drop
+  # it and redirect stdout to /dev/null instead.
+  _check_cmd="sha256sum -c"
+  has sha256sum || _check_cmd="shasum -a 256 -c"
+  if ! (cd "$_tmp" && grep -F " $_asset" SHA256SUMS | $_check_cmd >/dev/null 2>&1); then
     warn "SHA256 verification failed for $_asset — not installing"
     return 0
   fi
 
   tar -xzf "$_tmp/$_asset" -C "$_tmp"
-  _staging_dir="$_tmp/resq-cli-${_tag}-${_triple}"
-  if [ ! -x "$_staging_dir/resq" ]; then
-    warn "Archive layout unexpected ($_staging_dir/resq missing) — skipping"
+  # Locate the binary inside the extracted tree rather than assuming the
+  # staging-dir layout. Matches the pattern already used by
+  # scripts/install-resq.sh and stays resilient if release.yml ever renames
+  # the inner directory.
+  _staging_bin="$(find "$_tmp" -type f -name resq | head -n 1)"
+  if [ -z "$_staging_bin" ]; then
+    warn "Archive layout unexpected (resq binary missing) — skipping"
     return 0
   fi
 
   mkdir -p "$_bin_dir"
-  install -m 0755 "$_staging_dir/resq" "$_bin_path"
+  install -m 0755 "$_staging_bin" "$_bin_path"
   ok "Installed $_bin_path"
 
   case ":$PATH:" in
