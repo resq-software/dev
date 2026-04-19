@@ -218,6 +218,11 @@ authenticate_gh() {
 }
 
 install_nix() {
+  # Track whether Determinate installed Nix this session so we can remind the
+  # user to start a fresh shell (or source the profile) for `nix` to be on
+  # PATH in their interactive terminal — env mutations inside `curl | sh`
+  # don't propagate to the parent process.
+  NIX_JUST_INSTALLED=0
   if ! has nix; then
     if ! confirm "Install Nix package manager?"; then
       warn "Skipping Nix install — some repos require Nix for their dev environment."
@@ -225,8 +230,9 @@ install_nix() {
     fi
     info "Installing Nix via Determinate Systems installer..."
     curl --proto '=https' --tlsv1.2 -sSf -L "$NIX_INSTALL_URL" | sh -s -- install
+    NIX_JUST_INSTALLED=1
 
-    # Source nix in current shell
+    # Source nix in current shell (this script's process only; see note above).
     # shellcheck disable=SC1091
     if [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
       . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -461,13 +467,26 @@ install_resq_completions() {
   esac
 
   mkdir -p "$_compl_dir"
-  if "$_bin_path" completions "$_shell_name" > "$_compl_file" 2>/dev/null; then
+  # Capture stderr on failure so the user sees the real reason. Older resq
+  # binaries (before v0.2.7) don't know about `completions`; newer ones do.
+  # Using mktemp (not /tmp/...$$) so TMPDIR is honoured and we can't collide
+  # with a stale file owned by another user on a shared host.
+  _err_tmp="$(mktemp)"
+  _compl_err="$("$_bin_path" completions "$_shell_name" 2> "$_err_tmp" > "$_compl_file" && echo ok || echo fail)"
+  if [ "$_compl_err" = "ok" ] && [ -s "$_compl_file" ]; then
+    rm -f "$_err_tmp"
     ok "Installed $_shell_name completions to $_compl_file"
     if [ "$_shell_name" = "zsh" ]; then
       info "  zsh: add to ~/.zshrc if not already: fpath+=(\"$_compl_dir\"); autoload -Uz compinit && compinit"
     fi
   else
-    warn "Failed to generate $_shell_name completions — skip"
+    _err_msg="$(head -n 1 "$_err_tmp" 2>/dev/null)"
+    rm -f "$_compl_file" "$_err_tmp"
+    if [ -n "$_err_msg" ]; then
+      warn "Failed to generate $_shell_name completions: $_err_msg"
+    else
+      warn "Failed to generate $_shell_name completions (empty output — the installed resq may predate the 'completions' subcommand; retry once a newer release is out)"
+    fi
   fi
 }
 
@@ -477,6 +496,16 @@ print_repo_info() {
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
       printf "    Solana CLI, Anchor framework, Rust toolchain\n" >&2
       printf "    make anchor-build, make anchor-test\n\n" >&2
+      ;;
+    dotnet-sdk)
+      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
+      printf "    .NET 9 SDK, Protobuf toolchain\n" >&2
+      printf "    dotnet build -c Release, dotnet test -c Release\n\n" >&2
+      ;;
+    landing)
+      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
+      printf "    Bun, Next.js 15, Tailwind CSS, TypeScript\n" >&2
+      printf "    bun dev, bun run build\n\n" >&2
       ;;
     pypi)
       printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
@@ -531,6 +560,18 @@ main() {
   print_repo_info
 
   printf "${BOLD}${GREEN}  Ready!${RESET}\n\n" >&2
+
+  # If Determinate installed Nix this run, the user's interactive shell
+  # (which spawned `curl | sh`) hasn't sourced the profile yet. Flag this
+  # prominently before the "Get started" list so they don't hit
+  # `nix: command not found` when they follow the instructions.
+  if [ "${NIX_JUST_INSTALLED:-0}" = "1" ]; then
+    printf "  ${BOLD}${YELLOW}Note:${RESET} Nix was just installed. For \`nix\` to be on PATH, either:\n" >&2
+    printf "    - open a new terminal, or\n" >&2
+    printf "    - run:  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh\n" >&2
+    printf "  (fish users: set -x PATH /nix/var/nix/profiles/default/bin \$PATH)\n\n" >&2
+  fi
+
   printf "  ${BOLD}Get started:${RESET}\n\n" >&2
   printf "    cd %s\n" "$TARGET_DIR" >&2
   if [ -f "$TARGET_DIR/flake.nix" ]; then

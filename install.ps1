@@ -186,6 +186,11 @@ function Connect-GitHub {
 }
 
 function Install-Nix {
+    # Track whether we installed Nix this run so Main can warn the user
+    # afterwards that `nix` won't be on PATH in new terminals until they
+    # restart the shell (env mutations from the installer don't propagate
+    # back to the parent process that curl|pwsh'd this script).
+    $script:NixJustInstalled = $false
     if (-not (Test-Command 'nix')) {
         if ($IsNativeWindows) {
             Write-Info 'Nix is not natively supported on Windows.'
@@ -201,6 +206,7 @@ function Install-Nix {
 
         Write-Info 'Installing Nix via Determinate Systems installer...'
         bash -c "curl --proto '=https' --tlsv1.2 -sSf -L '$NixInstallUrl' | sh -s -- install"
+        $script:NixJustInstalled = $true
 
         # Source nix in current shell
         if (Test-Path '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh') {
@@ -501,6 +507,22 @@ function Show-RepoInfo {
             Write-Host '    make anchor-build, make anchor-test'
             Write-Host ''
         }
+        'dotnet-sdk' {
+            Write-Host ''
+            Write-Host '  What''s included:' -ForegroundColor White
+            Write-Host ''
+            Write-Host '    .NET 9 SDK, Protobuf toolchain'
+            Write-Host '    dotnet build -c Release, dotnet test -c Release'
+            Write-Host ''
+        }
+        'landing' {
+            Write-Host ''
+            Write-Host '  What''s included:' -ForegroundColor White
+            Write-Host ''
+            Write-Host '    Bun, Next.js 15, Tailwind CSS, TypeScript'
+            Write-Host '    bun dev, bun run build'
+            Write-Host ''
+        }
         'pypi' {
             Write-Host ''
             Write-Host '  What''s included:' -ForegroundColor White
@@ -575,6 +597,16 @@ function Main {
 
     Write-Host '  Ready!' -ForegroundColor Green
     Write-Host ''
+
+    if ($script:NixJustInstalled) {
+        Write-Host '  Note:' -ForegroundColor Yellow -NoNewline
+        Write-Host ' Nix was just installed. For `nix` to be on PATH, either:'
+        Write-Host '    - open a new terminal, or'
+        Write-Host '    - run:  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+        Write-Host '  (fish users: set -x PATH /nix/var/nix/profiles/default/bin $PATH)'
+        Write-Host ''
+    }
+
     Write-Host '  Get started:' -ForegroundColor White
     Write-Host ''
     Write-Host "    cd $($script:TargetDir)"
