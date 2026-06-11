@@ -11,6 +11,9 @@ permissions:
   issues: read
   pull-requests: read
 
+# AI engine - Gemini (free Google AI Studio tier; avoids Copilot utility-model rate limits)
+engine: gemini
+
 # Network access
 network: defaults
 
@@ -39,5 +42,4 @@ Be thorough but focus on high-impact issues. If no issues are found, post a brie
 
 ## Setup
 
-This workflow requires the `COPILOT_GITHUB_TOKEN` repository secret to be configured.
-See [`docs/guides/COPILOT_GITHUB_TOKEN_SETUP.md`](../../docs/guides/COPILOT_GITHUB_TOKEN_SETUP.md) for a step-by-step guide.
+This workflow uses the Gemini engine and requires the `GEMINI_API_KEY` repository secret (free key from https://aistudio.google.com).
