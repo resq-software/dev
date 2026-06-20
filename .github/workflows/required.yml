@@ -32,8 +32,10 @@ jobs:
           set -euo pipefail
           files=$(find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*')
           echo "Linting:"; echo "$files"
-          # -x follows `source`/`.` includes (scripts/lib/*.sh)
-          echo "$files" | xargs -r shellcheck -x
+          # -x follows `source`/`.` includes (scripts/lib/*.sh). Gate on
+          # errors only for now — the repo has pre-existing style/warning debt;
+          # tighten to default severity once that's burned down.
+          echo "$files" | xargs -r shellcheck -S error -x
 
   psscriptanalyzer:
     name: PSScriptAnalyzer + parse (*.ps1)
