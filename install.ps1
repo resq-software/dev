@@ -323,23 +323,28 @@ function Initialize-Repo {
     # authenticated HTTPS by `gh repo clone`). Re-fetching from a mutable raw
     # main ref and iex-ing it is a TOFU/RCE path.
     $hooksLocal = Join-Path $script:TargetDir 'scripts/install-hooks.ps1'
+    $reRun = '.\scripts\install-hooks.ps1'
     try {
         if (Test-Path $hooksLocal) {
+            # Execute as an in-memory script block (like the remote path) so it
+            # runs even under a Restricted execution policy without persisting a
+            # bypass — & on a .ps1 path would be blocked by default on clients.
+            $sb = [ScriptBlock]::Create((Get-Content -Raw -Path $hooksLocal))
             Push-Location $script:TargetDir
-            try { & $hooksLocal -TargetDir $script:TargetDir } finally { Pop-Location }
+            try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
             Write-Ok 'Git hooks configured'
         } else {
             # Fallback (cloned repo isn't dev). TODO: pin to a tag/SHA + verify a
             # SHA256 before executing to close the TOFU gap.
             $hooksUrl = "https://raw.githubusercontent.com/$Org/dev/main/scripts/install-hooks.ps1"
-            $remote = Invoke-RestMethod -Uri $hooksUrl -UseBasicParsing
-            $sb = [ScriptBlock]::Create($remote)
+            $reRun = "irm $hooksUrl | iex"
+            $sb = [ScriptBlock]::Create((Invoke-RestMethod -Uri $hooksUrl -UseBasicParsing))
             Push-Location $script:TargetDir
             try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
             Write-Ok 'Git hooks configured'
         }
     } catch {
-        Write-Warn "Hook install failed - re-run:  cd $($script:TargetDir); .\scripts\install-hooks.ps1"
+        Write-Warn "Hook install failed - re-run:  cd $($script:TargetDir); $reRun"
     }
 }
 

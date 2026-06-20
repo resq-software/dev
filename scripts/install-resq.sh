@@ -131,7 +131,9 @@ allow_unverified="${RESQ_ALLOW_UNVERIFIED:-0}"
 if [ -n "$sums_url" ]; then
     info "Verifying SHA256 against SHA256SUMS ..."
     curl -fsSL "$sums_url" -o "$tmp/SHA256SUMS"
-    expected=$(grep -F "$asset_name" "$tmp/SHA256SUMS" | awk '{print $1}')
+    # Exact filename-column match (text "  name" and binary " *name"); a plain
+    # grep -F would also match name.sig/.sha256 lines and yield multiple hashes.
+    expected=$(awk -v a="$asset_name" '$2 == a || $2 == "*"a {print $1}' "$tmp/SHA256SUMS")
     if [ -z "$expected" ]; then
         if [ "$allow_unverified" = "1" ]; then
             warn "Asset not listed in SHA256SUMS — proceeding (RESQ_ALLOW_UNVERIFIED=1)."
