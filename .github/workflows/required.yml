@@ -1,11 +1,9 @@
 # Copyright 2026 ResQ Software
 # SPDX-License-Identifier: Apache-2.0
 #
-# Minimal `required` status-check emitter — placeholder to satisfy the
-# org ruleset `default-branch-baseline` (id 15191038) while
-# language-specific reusable CI for this repo is still pending. Harden
-# this job (add `needs:` on real CI jobs) before the ruleset flips from
-# evaluate to active.
+# `required` status check for the org ruleset (default-branch-baseline).
+# It is the *only* required context, so it must actually gate: it depends on
+# real lint/analysis/secret-scan jobs and fails if any of them fail.
 
 name: required
 
@@ -22,8 +20,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  required:
-    name: required
+  shellcheck:
+    name: shellcheck (install.sh + scripts)
     runs-on: ubuntu-latest
     steps:
-      - run: echo "ok — placeholder until language CI lands"
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          files=$(find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*')
+          echo "Linting:"; echo "$files"
+          # -x follows `source`/`.` includes (scripts/lib/*.sh)
+          echo "$files" | xargs -r shellcheck -x
+
+  psscriptanalyzer:
+    name: PSScriptAnalyzer + parse (*.ps1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze + parse-check PowerShell
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $ps1 = Get-ChildItem -Recurse -Filter *.ps1 -File | Where-Object { $_.FullName -notmatch '[\\/](node_modules|\.git)[\\/]' }
+          if (-not $ps1) { Write-Host 'No .ps1 files'; exit 0 }
+          $fail = $false
+          foreach ($f in $ps1) {
+            $tok = $null; $perr = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tok, [ref]$perr) | Out-Null
+            if ($perr) { $fail = $true; Write-Host "PARSE ERROR: $($f.FullName)"; $perr | ForEach-Object { Write-Host "  $($_.Message)" } }
+          }
+          $issues = Invoke-ScriptAnalyzer -Path $ps1.FullName -Severity Error,Warning
+          if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; if ($issues | Where-Object Severity -eq 'Error') { $fail = $true } }
+          if ($fail) { throw 'PowerShell analysis found errors' }
+
+  secret-scan:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  required:
+    name: required
+    needs: [shellcheck, psscriptanalyzer, secret-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on required checks
+        run: |
+          set -euo pipefail
+          for r in \
+            "shellcheck=${{ needs.shellcheck.result }}" \
+            "psscriptanalyzer=${{ needs.psscriptanalyzer.result }}" \
+            "secret-scan=${{ needs.secret-scan.result }}"; do
+            name=${r%%=*}; res=${r#*=}
+            echo "$name: $res"
+            [ "$res" = "success" ] || { echo "::error::required check '$name' did not pass"; exit 1; }
+          done
+          echo "ok — all required checks passed"

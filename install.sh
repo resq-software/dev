@@ -337,11 +337,26 @@ post_clone_setup() {
   fi
 
   info "Installing canonical ResQ git hooks..."
-  _hooks_url="https://raw.githubusercontent.com/$ORG/dev/main/scripts/install-hooks.sh"
-  if (cd "$TARGET_DIR" && curl -fsSL "$_hooks_url" | sh); then
-    ok "Git hooks configured"
+  # Prefer the hooks script already present in the freshly-cloned tree — it was
+  # fetched over authenticated HTTPS by `gh repo clone`. Re-fetching it from a
+  # mutable raw.githubusercontent.com/main ref and piping to sh is a TOFU/RCE
+  # path (any branch/endpoint compromise → arbitrary code execution).
+  _hooks_local="$TARGET_DIR/scripts/install-hooks.sh"
+  if [ -f "$_hooks_local" ]; then
+    if (cd "$TARGET_DIR" && sh "$_hooks_local"); then
+      ok "Git hooks configured"
+    else
+      warn "Hook install failed — re-run: cd $TARGET_DIR && sh scripts/install-hooks.sh"
+    fi
   else
-    warn "Hook install failed — re-run: cd $TARGET_DIR && curl -fsSL $_hooks_url | sh"
+    # Fallback (cloned repo isn't dev, so the script isn't local): fetch it.
+    # TODO: pin to a tag/SHA + SHA256-verify before exec to close the TOFU gap.
+    _hooks_url="https://raw.githubusercontent.com/$ORG/dev/main/scripts/install-hooks.sh"
+    if (cd "$TARGET_DIR" && curl -fsSL "$_hooks_url" | sh); then
+      ok "Git hooks configured"
+    else
+      warn "Hook install failed — re-run: cd $TARGET_DIR && curl -fsSL $_hooks_url | sh"
+    fi
   fi
 }
 
