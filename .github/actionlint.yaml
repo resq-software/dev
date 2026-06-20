@@ -1,0 +1,9 @@
+# Skip gh-aw machine-generated workflow files (validated by `gh aw lint`/`compile`).
+# Auto-applied by actionlint regardless of which security-scan invokes it.
+paths:
+  "**/*.lock.yml":
+    ignore:
+      - ".*"
+  "**/agentics-maintenance.yml":
+    ignore:
+      - ".*"

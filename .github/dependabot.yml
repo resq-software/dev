@@ -1,18 +1,18 @@
-# Copyright 2026 ResQ Software
-# SPDX-License-Identifier: Apache-2.0
-#
-# Weekly dependency updates, grouped to keep PR noise low.
-
-version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:17"
-    groups:
-      actions:
-        patterns: ["*"]
-    labels: [chore, deps]
-    open-pull-requests-limit: 5
+- directory: /
+  groups:
+    actions:
+      patterns:
+      - "*"
+  ignore:
+  - dependency-name: "github/gh-aw-actions*" # Managed by gh aw compile. Version-locked to the gh-aw compiler; do not bump.
+  labels:
+  - chore
+  - deps
+  open-pull-requests-limit: 5
+  package-ecosystem: github-actions
+  schedule:
+    day: monday
+    interval: weekly
+    time: "06:17"
+version: 2
