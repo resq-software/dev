@@ -124,12 +124,22 @@ asset_name=$(basename "$asset_url")
 info "Downloading $asset_name ..."
 curl -fsSL "$asset_url" -o "$tmp/$asset_name"
 
+# Integrity gate: FAIL CLOSED. An installer that downloads + installs a binary
+# must refuse to proceed when it cannot verify the artifact. Every "can't
+# verify" branch aborts unless the operator explicitly opts out.
+allow_unverified="${RESQ_ALLOW_UNVERIFIED:-0}"
 if [ -n "$sums_url" ]; then
     info "Verifying SHA256 against SHA256SUMS ..."
     curl -fsSL "$sums_url" -o "$tmp/SHA256SUMS"
-    expected=$(grep -F "$asset_name" "$tmp/SHA256SUMS" | awk '{print $1}')
+    # Exact filename-column match (text "  name" and binary " *name"); a plain
+    # grep -F would also match name.sig/.sha256 lines and yield multiple hashes.
+    expected=$(awk -v a="$asset_name" '$2 == a || $2 == "*"a {print $1}' "$tmp/SHA256SUMS")
     if [ -z "$expected" ]; then
-        warn "Asset not listed in SHA256SUMS — skipping verification."
+        if [ "$allow_unverified" = "1" ]; then
+            warn "Asset not listed in SHA256SUMS — proceeding (RESQ_ALLOW_UNVERIFIED=1)."
+        else
+            fail "Asset not listed in SHA256SUMS — refusing to install unverified (set RESQ_ALLOW_UNVERIFIED=1 to override)."
+        fi
     else
         if command -v sha256sum >/dev/null 2>&1; then
             actual=$(sha256sum "$tmp/$asset_name" | awk '{print $1}')
@@ -138,12 +148,20 @@ if [ -n "$sums_url" ]; then
         else
             actual=""
         fi
-        if [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+        if [ -z "$actual" ]; then
+            if [ "$allow_unverified" = "1" ]; then
+                warn "No sha256sum/shasum available — proceeding unverified (RESQ_ALLOW_UNVERIFIED=1)."
+            else
+                fail "No sha256sum/shasum tool to verify the download — refusing (install coreutils, or set RESQ_ALLOW_UNVERIFIED=1)."
+            fi
+        elif [ "$expected" != "$actual" ]; then
             fail "SHA256 mismatch for $asset_name (expected $expected, got $actual)."
         fi
     fi
+elif [ "$allow_unverified" = "1" ]; then
+    warn "No SHA256SUMS in release — proceeding unverified (RESQ_ALLOW_UNVERIFIED=1)."
 else
-    warn "No SHA256SUMS in release — skipping verification."
+    fail "No SHA256SUMS in release — refusing to install unverified (set RESQ_ALLOW_UNVERIFIED=1 to override)."
 fi
 
 # ── Extract ──────────────────────────────────────────────────────────────────
