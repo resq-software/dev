@@ -22,8 +22,13 @@ permissions:
 
 jobs:
   scan:
-    uses: resq-software/.github/.github/workflows/security-scan.yml@main
+    uses: resq-software/.github/.github/workflows/security-scan.yml@94363a6a6856b7d86aceac91c4ff7df4bc19ced9 # main
     with:
       languages: '["actions"]'
       enable-semgrep: true
-    secrets: inherit
+    # Forward only the named secrets the reusable workflow declares, instead
+    # of `secrets: inherit` (which hands it ALL of this repo's secrets and
+    # trips zizmor's `secrets-inherit` audit).
+    secrets:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
