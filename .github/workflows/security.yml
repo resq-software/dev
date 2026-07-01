@@ -22,6 +22,10 @@ permissions:
 
 jobs:
   scan:
+    # Skip on Dependabot PRs: a cross-repo reusable workflow called with `secrets: inherit`
+    # startup-fails for Dependabot's restricted context, which blocks Dependabot's own security
+    # PRs. Dependabot already vetted the bump; push/schedule still scan the default branch.
+    if: ${{ github.actor != 'dependabot[bot]' }}
     uses: resq-software/.github/.github/workflows/security-scan.yml@94363a6a6856b7d86aceac91c4ff7df4bc19ced9 # main
     with:
       languages: '["actions"]'
