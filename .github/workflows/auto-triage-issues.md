@@ -14,7 +14,8 @@ permissions:
   contents: read
   issues: read
 
-engine: copilot
+# AI engine - Gemini (free Google AI Studio tier; avoids Copilot utility-model rate limits)
+engine: gemini
 
 strict: true
 
