@@ -32,7 +32,7 @@ jobs:
     # startup-fails for Dependabot's restricted context, which blocks Dependabot's own security
     # PRs. Dependabot already vetted the bump; push/schedule still scan the default branch.
     if: ${{ github.actor != 'dependabot[bot]' }}
-    uses: resq-software/.github/.github/workflows/security-scan.yml@94363a6a6856b7d86aceac91c4ff7df4bc19ced9 # main
+    uses: resq-software/.github/.github/workflows/security-scan.yml@44987ffd6eb5b1aa9d0a0d39e8dde9d669fe1d84 # main
     with:
       languages: '["actions"]'
       enable-semgrep: true
