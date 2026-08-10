@@ -61,14 +61,18 @@ jobs:
           # What install.sh offers: field 1 of every REPOS record, read from the
           # live table. Re-listing the repos here would just create a fourth
           # place to drift.
-          sed -n '/^REPOS="\$(cat <<.EOF.$/,/^EOF$/p' install.sh \
+          # [$] rather than \$ : both match a literal dollar, but \$ inside
+          # single quotes trips shellcheck SC2016, which actionlint treats as
+          # a failure. A bracket expression says the same thing without needing
+          # a suppression comment.
+          sed -n '/^REPOS="[$](cat <<.EOF.$/,/^EOF$/p' install.sh \
             | grep -v '^REPOS=' | grep -v '^EOF$' \
             | cut -d'|' -f1 | grep -v '^$' | sort -u > sh.txt
 
           # What install.ps1 offers. Scoped to the $Repos block on purpose:
           # matching `Name = '...'` across the whole file also picks up
           # $binName assignments like 'resq' and 'resq.exe'.
-          sed -n '/^\$Repos = @($/,/^)$/p' install.ps1 \
+          sed -n '/^[$]Repos = @($/,/^)$/p' install.ps1 \
             | grep -oE "Name = '[^']+'" \
             | sed "s/Name = '//; s/'//" | sort -u > ps1.txt
 
