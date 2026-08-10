@@ -285,18 +285,46 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
     if (digestsEqual(await sha256Hex(bytes), expectedDigest)) return bytes;
   }
 
-  const upstream = await fetch(
-    `https://raw.githubusercontent.com/${REPO}/${commit}/${repoPath}`,
-    {
-      cf: { cacheTtl: 3600, cacheEverything: true },
-      headers: { "user-agent": "get.resq.software" },
-      redirect: "error",
-    },
-  );
-  if (!upstream.ok) return null;
+  // Staged so a failure names the stage it happened in. The first version of
+  // this function let anything unexpected propagate, which surfaced as an
+  // opaque 500 with no way to tell a network problem from a bad digest. Every
+  // stage now fails closed to null, which the caller turns into a 502.
+  let bytes;
+  try {
+    const upstream = await fetch(
+      `https://raw.githubusercontent.com/${REPO}/${commit}/${repoPath}`,
+      {
+        cf: { cacheTtl: 3600, cacheEverything: true },
+        headers: { "user-agent": "get.resq.software" },
+        // "manual", not "error". Workers' fetch() rejects redirect: "error",
+        // which throws on every subrequest rather than only on a redirect —
+        // Node accepts it, so local tests passed while production 500'd. A
+        // redirect from a pinned commit URL would itself be suspicious, so it
+        // is treated as a failure explicitly below.
+        redirect: "manual",
+      },
+    );
 
-  const bytes = await readCapped(upstream, MAX_BYTES);
-  if (bytes === null) return null;
+    if (upstream.status >= 300 && upstream.status < 400) {
+      console.error(JSON.stringify({ event: "upstream_redirect", commit, path: repoPath, status: upstream.status }));
+      return null;
+    }
+    if (!upstream.ok) {
+      console.error(JSON.stringify({ event: "upstream_status", commit, path: repoPath, status: upstream.status }));
+      return null;
+    }
+
+    bytes = await readCapped(upstream, MAX_BYTES);
+    if (bytes === null) {
+      console.error(JSON.stringify({ event: "upstream_too_large", commit, path: repoPath }));
+      return null;
+    }
+  } catch (err) {
+    console.error(
+      JSON.stringify({ event: "upstream_fetch_threw", commit, path: repoPath, message: String(err && err.message) }),
+    );
+    return null;
+  }
 
   if (!digestsEqual(await sha256Hex(bytes), expectedDigest)) return null;
 
