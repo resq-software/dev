@@ -1,0 +1,220 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tag -> verify -> publish -> propose the pin bump.
+#
+# NO CLOUDFLARE CREDENTIALS LIVE HERE. Deployment is done by Cloudflare Workers
+# Builds, which pulls from this repository directly, so GitHub never holds a
+# key that can touch the account. This workflow only uses github.token.
+#
+# WHY A TAG, AND WHY A PR
+#
+# get.resq.software is piped into people's shells. What it serves is decided
+# entirely by the PINS block in worker/src/index.js — not by when the Worker
+# happens to deploy. So the gate that matters is code review on worker/, which
+# CODEOWNERS enforces. This workflow does the tedious half automatically
+# (compute digests, prove GitHub serves them, publish SHA256SUMS) and leaves
+# exactly one human act: approving a PR whose diff shows precisely which
+# digests change.
+#
+# Creating a v* tag is itself restricted to @resq-software/installer-maintainers
+# by the `release-tags` ruleset, which also blocks tag update and deletion —
+# pins resolve tags to commits, so a force-moved tag would silently repoint a
+# published version.
+#
+# actions/checkout is the only third-party action, at the SHA already trusted
+# elsewhere in this repo.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Never cancel a release mid-flight.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify pins
+    runs-on: ubuntu-latest
+    outputs:
+      pins: ${{ steps.pins.outputs.json }}
+      version: ${{ steps.pins.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gen-pins.sh derives the pin set from every v* tag, so shallow
+          # history would silently drop older releases and 404 their URLs.
+          fetch-depth: 0
+
+      - name: Compute pins from tag history
+        id: pins
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          json="$(sh bin/gen-pins.sh --compact)"
+
+          # Guard against tagging a commit gen-pins cannot see. If this fires,
+          # the tag exists but produced no artifacts, and publishing would
+          # advertise a version whose URLs 404.
+          if ! printf '%s' "$json" | jq -e --arg v "$version" '.releases[$v]' >/dev/null; then
+            echo "::error::tag $GITHUB_REF_NAME produced no pin entry for version $version"
+            exit 1
+          fi
+
+          latest="$(printf '%s' "$json" | jq -r '.latest')"
+          if [ "$latest" != "$version" ]; then
+            echo "::warning::$version is not the latest release ($latest); / will continue to serve $latest"
+          fi
+
+          {
+            echo "json=$json"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assert the tag matches VERSION
+        # VERSION is the single authored copy; the tag must name the same
+        # release. Stamping happens before tagging, so by the time we get here
+        # the commit should already declare its own version.
+        run: |
+          set -euo pipefail
+          want="$(tr -d ' \t\r\n' < VERSION)"
+          got="${GITHUB_REF_NAME#v}"
+          if [ "$want" != "$got" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($want). Update VERSION, run bin/stamp.sh, merge, then re-tag."
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches VERSION"
+
+      - name: Assert the installers are stamped
+        # Verification by regeneration: re-run the stamper and fail if anything
+        # would change. Comparing individual strings would silently miss any new
+        # stamped value someone adds later; this cannot.
+        run: sh bin/stamp.sh --check
+
+      - name: Assert GitHub serves exactly these bytes
+        # Without this, a mismatch would only surface for users, whose shells
+        # would get a 502 from a Worker correctly refusing to serve.
+        run: sh bin/gen-pins.sh --check
+
+      - name: Worker test suite
+        run: |
+          set -euo pipefail
+          node --version
+          node worker/test/index.test.mjs
+
+  release:
+    name: publish release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # Passed via env, never interpolated into the script body, so the value
+      # can never be parsed as shell.
+      PINS: ${{ needs.verify.outputs.pins }}
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - name: Rebuild SHA256SUMS from the pin set
+        run: |
+          set -euo pipefail
+          printf '%s' "$PINS" \
+            | jq -r --arg v "$VERSION" \
+                '.releases[$v].artifacts | to_entries[] | "\(.value)  \(.key)"' \
+            | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Installer artifacts pinned at \`$GITHUB_SHA\`."
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://get.resq.software | sh"
+            echo "curl -fsSL https://get.resq.software/v$VERSION/install.sh | sh   # this release, forever"
+            echo '```'
+            echo
+            echo "Verify what you were served:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://get.resq.software/install.sh | sha256sum"
+            echo "curl -fsSI https://get.resq.software | grep x-resq-sha256"
+            echo '```'
+            echo
+            echo '### SHA256SUMS'
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > NOTES.md
+          gh release create "$GITHUB_REF_NAME" SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file NOTES.md
+
+  bump:
+    name: propose pin bump
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Regenerate PINS
+        id: bump
+        run: |
+          set -euo pipefail
+          sh bin/gen-pins.sh --write
+          if git diff --quiet -- worker/src/index.js; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "PINS already current; nothing to propose."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff -- worker/src/index.js
+          fi
+
+      - name: Open pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="release/pins-v$VERSION"
+
+          # required.yml also runs on push for release/pins-* precisely because
+          # a PR opened with github.token does not trigger workflow runs. Status
+          # checks bind to the commit SHA, so the push-triggered run satisfies
+          # the PR's required check without needing a PAT or an app secret.
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add worker/src/index.js
+          git commit -m "chore(worker): pin get.resq.software to v$VERSION"
+          git push --force-with-lease origin "$branch"
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --title "chore(worker): pin get.resq.software to v$VERSION" \
+            --body "Regenerated by \`bin/gen-pins.sh --write\` from tag \`v$VERSION\`.
+
+          Merging this is what changes the bytes \`curl -fsSL https://get.resq.software | sh\` serves. Cloudflare Workers Builds deploys on merge.
+
+          Digests were already verified against raw.githubusercontent.com in the \`verify\` job of this release, and \`SHA256SUMS\` is published on the [release](../../releases/tag/v$VERSION). Review the diff below against it."

@@ -1,0 +1,38 @@
+{
+  // get.resq.software — pinned, hash-verified installer distribution.
+  //
+  //   npx wrangler dev      # local, hits the real pinned upstream
+  //   npx wrangler deploy   # ship it
+  //
+  // The pin set lives in src/index.js (PINS). A release deploy can override it
+  // without touching source by setting the RESQ_PINS var to the same JSON
+  // shape — see the comment above PINS.
+  // MUST match the existing Worker in the dashboard. A different name here
+  // creates a second Worker beside the live one instead of updating it, and
+  // get.resq.software would go on serving the old script.
+  "name": "get-resq-software",
+  "main": "src/index.js",
+
+  // Matches what the live Worker already runs, so adopting this config is not
+  // also a silent runtime upgrade. Bump it deliberately, on its own.
+  "compatibility_date": "2026-04-25",
+
+  // BEHAVIOUR CHANGE: get-resq-software.resq-eng.workers.dev is enabled today.
+  // Deploying with this false removes it. That is intentional — it is a second
+  // origin serving the same installer, outside the HSTS preload on
+  // get.resq.software. Set true if something turns out to depend on it.
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "get.resq.software",
+      "custom_domain": true
+    }
+  ],
+
+  // verification_failed events are logged as structured JSON. They should be
+  // zero under normal operation — a nonzero rate means the pin is stale or
+  // upstream content changed under a commit SHA. Both warrant attention.
+  "observability": {
+    "enabled": true
+  }
+}

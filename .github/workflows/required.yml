@@ -10,7 +10,13 @@ name: required
 
 on:
   push:
-    branches: [main, master]
+    # release/pins-* is listed deliberately. The pin-bump PR from release.yml is
+    # opened with github.token, and GitHub does not trigger workflow runs for
+    # events from that token — so a pull_request run never happens and the PR
+    # could never satisfy its required check. Status checks bind to the commit
+    # SHA, so this push-triggered run supplies the `required` context instead.
+    # That avoids needing a PAT or GitHub App secret purely to unblock a bot PR.
+    branches: [main, master, 'release/pins-*']
   pull_request:
 
 permissions:
@@ -34,6 +40,14 @@ jobs:
         run: >-
           find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*'
           -exec shellcheck -S error -x {} +
+
+      # Catch drift on the PR that causes it rather than at tag time. VERSION is
+      # the only authored copy of the version; SCRIPT_VERSION, $ScriptVersion
+      # and both hook digests are generated from it and from the hook files.
+      # Editing scripts/install-hooks.* without re-stamping would otherwise ship
+      # installers that reject the very file they are meant to run.
+      - name: Installers stamped from VERSION
+        run: sh bin/stamp.sh --check
 
   powershell:
     name: PowerShell parse + analyze (*.ps1)
@@ -62,9 +76,24 @@ jobs:
           } catch { Write-Host "PSScriptAnalyzer skipped: $($_.Exception.Message)" }
           if ($fail) { throw 'PowerShell parse errors found' }
 
+  worker:
+    name: worker (get.resq.software)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Also validates the inline PINS fallback in worker/src/index.js: with no
+      # RESQ_PINS override the suite exercises those pins against live GitHub,
+      # so digests that have rotted surface here as a 502 rather than in
+      # production, where the Worker would correctly refuse to serve anything.
+      - name: Worker test suite
+        run: |
+          set -euo pipefail
+          node --version
+          node worker/test/index.test.mjs
+
   required:
     name: required
-    needs: [shellcheck, powershell]
+    needs: [shellcheck, powershell, worker]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +102,8 @@ jobs:
           set -euo pipefail
           for r in \
             "shellcheck=${{ needs.shellcheck.result }}" \
-            "powershell=${{ needs.powershell.result }}"; do
+            "powershell=${{ needs.powershell.result }}" \
+            "worker=${{ needs.worker.result }}"; do
             name=${r%%=*}; res=${r#*=}
             echo "$name: $res"
             [ "$res" = "success" ] || { echo "::error::required check '$name' did not pass"; exit 1; }

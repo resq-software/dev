@@ -1,8 +1,33 @@
-# Default owner for everything not matched by a more specific rule.
-*                         @WomB0ComB0
+# THIS is the file GitHub uses. When CODEOWNERS exists in more than one place,
+# GitHub takes the first found searching .github/ -> root -> docs/, so a copy at
+# the repository root is ignored entirely. Edit this one.
+#
+# Everything here is part of the supply chain for
+# `curl -fsSL https://get.resq.software | sh` — a change to any path below ends
+# up executing on a developer's machine.
+#
+# CODEOWNERS is advisory on its own. It binds only when the branch ruleset both
+# requires code owner review AND does not let the author bypass it. Ruleset
+# `default-branch-baseline` currently sets required_approving_review_count: 0
+# and grants repository admins `bypass_mode: pull_request`, so an admin can
+# still self-merge. Tighten that ruleset to make this file load-bearing.
+#
+# Membership: https://github.com/orgs/resq-software/teams/installer-maintainers
+# Adding or removing a person is a team change, not a commit here.
 
-# Installer + canonical git hooks — the blast-radius surface.
-/install.sh               @WomB0ComB0
-/install.ps1              @WomB0ComB0
-/scripts/                 @WomB0ComB0
-/.github/workflows/       @WomB0ComB0
+# Default owner for everything not matched by a more specific rule.
+*                         @resq-software/installer-maintainers
+
+# The paths that actually reach a user's shell. Most specific match wins.
+/install.sh               @resq-software/installer-maintainers
+/install.ps1              @resq-software/installer-maintainers
+/scripts/                 @resq-software/installer-maintainers
+
+# The Worker and its pin set decide which bytes are served, and bin/ generates
+# them. Cloudflare Workers Builds deploys worker/ straight from main, so a merge
+# here is a production change.
+/worker/                  @resq-software/installer-maintainers
+/bin/                     @resq-software/installer-maintainers
+
+/.github/workflows/       @resq-software/installer-maintainers
+/.github/CODEOWNERS       @resq-software/installer-maintainers

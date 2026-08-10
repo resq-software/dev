@@ -39,7 +39,16 @@ fi
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-SCRIPT_VERSION="0.3.0"
+# Must match the v* tag this script is published under. The hook fetch below
+# requests https://get.resq.software/v$SCRIPT_VERSION/hooks.sh, so an older
+# install.sh keeps verifying against the digest it actually shipped with rather
+# than against whatever happens to be current. release.yml refuses to publish a
+# tag whose version disagrees with this value.
+SCRIPT_VERSION="0.4.0"
+
+# Everything this script creates belongs to the invoking user alone. Set before
+# the first mkdir/mktemp so nothing is even briefly group- or world-readable.
+umask 077
 
 # Disable ANSI when stderr isn't a TTY or NO_COLOR is set (CI, log redirects).
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -56,8 +65,41 @@ fi
 NIX_INSTALL_URL="https://install.determinate.systems/nix"
 ORG="resq-software"
 
-# Canonical repo list — keep in sync with install.ps1 and README.md.
-VALID_REPOS="programs dotnet-sdk pypi crates npm vcpkg landing docs viz"
+# Pinned, hash-verified distribution endpoint (see worker/src/index.js). It
+# serves one specific commit and refuses to serve anything whose SHA-256 does
+# not match, which is why fetching from here beats raw.githubusercontent.com's
+# mutable /main ref.
+DIST_BASE="https://get.resq.software"
+
+# SHA-256 of scripts/install-hooks.sh as published at this SCRIPT_VERSION,
+# checked before that file is ever executed. This is the link that closes the
+# trust chain: the Worker vouches for install.sh, and install.sh vouches for
+# the hook installer. A compromised endpoint still cannot get code past it.
+# Regenerate with:
+#   git cat-file blob "$(git rev-parse "v$SCRIPT_VERSION"):scripts/install-hooks.sh" | sha256sum
+HOOKS_SHA256="24bd874dd27ff55153be602a5ad7fb366f4283ae4423323f8fd2bc2af442c68a"
+
+# Canonical repo table — one source of truth for the menu, REPO validation, and
+# the post-install summary. Those used to be three separate lists that could
+# disagree, and did: `landing` went private while still being offered as menu
+# option 7, so choosing it failed at clone time.
+#
+#   name|one-line description|what's included, ';' separating lines
+#
+# Scope is mechanical so CI can verify it: public, non-fork repositories in the
+# org, excluding `.github`. Keep in sync with install.ps1 and README.md.
+REPOS="$(cat <<'EOF'
+crates|Rust workspace (CLI + DSA)|Rust toolchain, clippy, cargo-deny;Workspace: 9+ crates including CLI tools and resq-dsa
+dev|Developer setup + installers|POSIX sh + PowerShell installers, Cloudflare Worker;shellcheck install.sh, node worker/test/index.test.mjs
+docs|Documentation site|Mintlify docs site;npx mint dev for local preview
+dotnet-sdk|.NET client libraries|.NET 9 SDK, Protobuf toolchain;dotnet build -c Release, dotnet test -c Release
+npm|TypeScript packages (UI + DSA)|Bun, TypeScript, React 19, Storybook, Chromatic;Packages: @resq-sw/ui (55+ components), @resq-sw/dsa;Biome linter
+programs|Solana/Anchor on-chain programs|Solana CLI, Anchor framework, Rust toolchain;make anchor-build, make anchor-test
+pypi|Python packages (MCP + DSA)|Python 3.11-3.13, uv, ruff, mypy;Packages: resq-mcp, resq-dsa;90% test coverage gate enforced
+vcpkg|C++ libraries|C++ toolchain, CMake, clang-format;Header-only library: resq-common
+viz|3D visualization|Three.js / Cesium web viewers (TypeScript);Unity 3D viewer (.NET 9, ResQ.Viz.sln)
+EOF
+)"
 
 # ── Utility functions (all log to stderr) ────────────────────────────────────
 
@@ -67,6 +109,96 @@ warn() { printf "${YELLOW}warn${RESET}  %s\n" "$*" >&2; }
 fail() { printf "${RED}fail${RESET}  %s\n" "$*" >&2; exit 1; }
 
 has() { command -v "$1" >/dev/null 2>&1; }
+
+# ── Temp file cleanup ────────────────────────────────────────────────────────
+#
+# One trap for the whole script. install_resq_cli used to set its own `trap ...
+# EXIT` mid-run, which clobbered any trap set earlier and stayed armed across
+# that function's several early `return` paths — so a later, unrelated failure
+# would fire a handler still referring to a stale directory name.
+#
+# Newline-separated rather than space-separated so a TMPDIR containing spaces
+# cannot turn cleanup into an `rm -rf` of the wrong thing.
+_TMP_PATHS=""
+
+cleanup() {
+  [ -n "$_TMP_PATHS" ] || return 0
+  printf '%s\n' "$_TMP_PATHS" | while IFS= read -r _cl_path; do
+    [ -n "$_cl_path" ] && rm -rf "$_cl_path"
+  done
+  _TMP_PATHS=""
+}
+trap cleanup EXIT HUP INT QUIT TERM
+
+# Creates a temp directory, registers it for cleanup, and reports it in the
+# global TMPDIR_PATH. Fails loudly rather than returning an empty path that
+# would later expand to nothing.
+#
+# Deliberately assigns a global instead of echoing: `d="$(make_tmpdir)"` would
+# run this in a subshell, so the _TMP_PATHS registration would be thrown away
+# and the directory would outlive the script.
+make_tmpdir() {
+  TMPDIR_PATH="$(mktemp -d 2>/dev/null)" || fail "could not create a temporary directory"
+  _TMP_PATHS="$_TMP_PATHS
+$TMPDIR_PATH"
+}
+
+# macOS ships `shasum -a 256` but not `sha256sum`. Reading from stdin keeps the
+# output to a bare digest on both, with no filename column to strip.
+sha256_of() {
+  if has sha256sum; then sha256sum < "$1" | cut -d' ' -f1
+  elif has shasum;  then shasum -a 256 < "$1" | cut -d' ' -f1
+  else return 1
+  fi
+}
+
+# Download $1 to $2, and keep it only if its SHA-256 equals $3. Returns 1 on
+# any failure, having removed the file — a caller can never end up executing
+# bytes this function did not vouch for.
+fetch_verified() {
+  _fv_url="$1"
+  _fv_dest="$2"
+  _fv_want="$3"
+
+  curl -fsSL --proto '=https' --tlsv1.2 "$_fv_url" -o "$_fv_dest" || return 1
+
+  if ! _fv_got="$(sha256_of "$_fv_dest")"; then
+    warn "neither sha256sum nor shasum is available — refusing to run unverified code"
+    rm -f "$_fv_dest"
+    return 1
+  fi
+
+  if [ "$_fv_got" != "$_fv_want" ]; then
+    rm -f "$_fv_dest"
+    warn "checksum mismatch for $_fv_url"
+    warn "  expected $_fv_want"
+    warn "  got      $_fv_got"
+    return 1
+  fi
+  return 0
+}
+
+# ── REPOS table access ───────────────────────────────────────────────────────
+#
+# awk compares the name with `==`, i.e. exact string equality, so a value typed
+# by the user can never be interpreted as a pattern the way it could with grep.
+
+repo_field() {  # name field-number -> field value (empty if no such repo)
+  printf '%s\n' "$REPOS" | awk -F'|' -v n="$1" -v f="$2" '$1 == n { print $f; exit }'
+}
+
+repo_exists() { [ -n "$(repo_field "$1" 1)" ]; }
+
+repo_names() { printf '%s\n' "$REPOS" | awk -F'|' '{ printf "%s ", $1 }'; }
+
+# Accept either a menu number or a repo name, and echo the resolved name.
+# Empty output means "no match" — the caller re-prompts rather than aborting.
+resolve_choice() {
+  case "$1" in
+    ''|*[!0-9]*) printf '%s\n' "$REPOS" | awk -F'|' -v n="$1" '$1 == n { print $1; exit }' ;;
+    *)           printf '%s\n' "$REPOS" | awk -F'|' -v i="$1" 'NR == i { print $1; exit }' ;;
+  esac
+}
 
 # Compare two dotted version strings. Returns 0 if $1 >= $2.
 # POSIX-compatible: uses IFS splitting and positional params (no arrays).
@@ -264,44 +396,46 @@ check_nix_flakes() {
 choose_repo() {
   # Honour REPO=<name> for unattended installs (CI, provisioning).
   if [ -n "${REPO:-}" ]; then
-    for _r in $VALID_REPOS; do
-      if [ "$_r" = "$REPO" ]; then
-        info "Using REPO=$REPO from environment"
-        return 0
-      fi
-    done
-    fail "Invalid REPO='$REPO'. Valid: $VALID_REPOS"
+    if repo_exists "$REPO"; then
+      info "Using REPO=$REPO from environment"
+      return 0
+    fi
+    fail "Invalid REPO='$REPO'. Valid: $(repo_names)"
   fi
 
   if [ ! -e /dev/tty ]; then
-    fail "No TTY for interactive prompt. Set REPO=<name> to run unattended. Valid: $VALID_REPOS"
+    fail "No TTY for interactive prompt. Set REPO=<name> to run unattended. Valid: $(repo_names)"
   fi
 
-  printf "\n${BOLD}  Which repo do you want to work on?${RESET}\n\n" >&2
-  printf "  ${CYAN} 1${RESET}  programs      Solana/Anchor on-chain programs\n" >&2
-  printf "  ${CYAN} 2${RESET}  dotnet-sdk    .NET client libraries\n" >&2
-  printf "  ${CYAN} 3${RESET}  pypi          Python packages (MCP + DSA)\n" >&2
-  printf "  ${CYAN} 4${RESET}  crates        Rust workspace (CLI + DSA)\n" >&2
-  printf "  ${CYAN} 5${RESET}  npm           TypeScript packages (UI + DSA)\n" >&2
-  printf "  ${CYAN} 6${RESET}  vcpkg         C++ libraries\n" >&2
-  printf "  ${CYAN} 7${RESET}  landing       Marketing site\n" >&2
-  printf "  ${CYAN} 8${RESET}  docs          Documentation site\n" >&2
-  printf "  ${CYAN} 9${RESET}  viz           3D visualization (Three.js/Cesium + Unity)\n" >&2
-  printf "\n  Choice [1-9]: " >&2
-  read -r choice < /dev/tty
+  _cr_count="$(printf '%s\n' "$REPOS" | wc -l | tr -d ' ')"
 
-  case "$choice" in
-    1)  REPO="programs" ;;
-    2)  REPO="dotnet-sdk" ;;
-    3)  REPO="pypi" ;;
-    4)  REPO="crates" ;;
-    5)  REPO="npm" ;;
-    6)  REPO="vcpkg" ;;
-    7)  REPO="landing" ;;
-    8)  REPO="docs" ;;
-    9)  REPO="viz" ;;
-    *)  fail "Invalid choice: $choice" ;;
-  esac
+  # Loop rather than abort. A typo here used to end the whole run — after gh,
+  # Nix and a package manager pass had already completed — forcing the user to
+  # start over for a mistyped digit.
+  while :; do
+    printf "\n${BOLD}  Which repo do you want to work on?${RESET}\n\n" >&2
+
+    # Numbered from the table itself, so the list can grow past 9 entries
+    # without the prompt and the mapping drifting apart. Colours stay inside
+    # the printf format string because that is what expands \033.
+    _cr_i=0
+    printf '%s\n' "$REPOS" | while IFS='|' read -r _cr_name _cr_desc _cr_rest; do
+      _cr_i=$((_cr_i + 1))
+      printf "  ${CYAN}%2d${RESET}  %-12s %s\n" "$_cr_i" "$_cr_name" "$_cr_desc" >&2
+    done
+
+    printf "\n  Choice [1-%s, or a name]: " "$_cr_count" >&2
+
+    # A closed stdin (piped, no tty) must not spin forever.
+    if ! read -r _cr_choice < /dev/tty; then
+      fail "No input on /dev/tty — set REPO=<name> to run unattended"
+    fi
+
+    REPO="$(resolve_choice "$_cr_choice")"
+    [ -n "$REPO" ] && return 0
+
+    warn "Not a valid choice: $_cr_choice"
+  done
 }
 
 clone_repo() {
@@ -348,15 +482,40 @@ post_clone_setup() {
     else
       warn "Hook install failed — re-run: cd $TARGET_DIR && sh scripts/install-hooks.sh"
     fi
-  else
-    # Fallback (cloned repo isn't dev, so the script isn't local): fetch it.
-    # TODO: pin to a tag/SHA + SHA256-verify before exec to close the TOFU gap.
-    _hooks_url="https://raw.githubusercontent.com/$ORG/dev/main/scripts/install-hooks.sh"
-    if (cd "$TARGET_DIR" && curl -fsSL "$_hooks_url" | sh); then
-      ok "Git hooks configured"
-    else
-      warn "Hook install failed — re-run: cd $TARGET_DIR && curl -fsSL $_hooks_url | sh"
+    return 0
+  fi
+
+  # No local copy (the cloned repo isn't `dev`), so fetch one.
+  #
+  # This was `curl .../dev/main/scripts/install-hooks.sh | sh` — a plain remote
+  # code execution path: /main is mutable, nothing was verified, and the bytes
+  # reached a shell without ever being inspected. Now the download is pinned to
+  # this script's own version and checked against HOOKS_SHA256 before it runs,
+  # so neither a compromised endpoint nor a MITM can substitute code.
+  #
+  # /v$SCRIPT_VERSION/ rather than bare /hooks.sh on purpose: an install.sh from
+  # an older release has to verify against the digest it shipped with, not
+  # against whatever the newest release happens to publish.
+  make_tmpdir
+  _hooks_tmp="$TMPDIR_PATH/install-hooks.sh"
+  _hooks_url="$DIST_BASE/v$SCRIPT_VERSION/hooks.sh"
+
+  if ! fetch_verified "$_hooks_url" "$_hooks_tmp" "$HOOKS_SHA256"; then
+    # Fall back to the tag ref: the endpoint may simply be down. The digest
+    # check is what provides the safety here, not the choice of host, and v*
+    # tags cannot be moved or deleted under the `release-tags` ruleset.
+    _hooks_url="https://raw.githubusercontent.com/$ORG/dev/v$SCRIPT_VERSION/scripts/install-hooks.sh"
+    if ! fetch_verified "$_hooks_url" "$_hooks_tmp" "$HOOKS_SHA256"; then
+      warn "Could not obtain a verified install-hooks.sh — skipping hook setup"
+      warn "  Set them up later with: cd $TARGET_DIR && resq hooks install"
+      return 0
     fi
+  fi
+
+  if (cd "$TARGET_DIR" && sh "$_hooks_tmp"); then
+    ok "Git hooks configured (verified $(printf '%.12s' "$HOOKS_SHA256")…)"
+  else
+    warn "Hook install failed — re-run: cd $TARGET_DIR && resq hooks install"
   fi
 }
 
@@ -404,9 +563,13 @@ install_resq_cli() {
   fi
 
   info "Installing resq $_expected_ver for $_triple..."
-  _tmp="$(mktemp -d)"
-  # shellcheck disable=SC2064
-  trap "rm -rf \"$_tmp\"" EXIT HUP INT QUIT TERM
+  # Registers with the script-wide cleanup trap instead of installing a local
+  # one. The previous `trap "rm -rf $_tmp" EXIT HUP INT QUIT TERM` here replaced
+  # whatever trap was already set, and stayed armed across the several early
+  # `return` paths below — so an unrelated later failure fired a handler still
+  # pointing at this function's directory.
+  make_tmpdir
+  _tmp="$TMPDIR_PATH"
 
   _asset="resq-cli-${_tag}-${_triple}.tar.gz"
   if ! gh release download "$_tag" --repo "$ORG/crates" \
@@ -506,65 +669,72 @@ install_resq_completions() {
 }
 
 print_repo_info() {
-  case "$REPO" in
-    programs)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Solana CLI, Anchor framework, Rust toolchain\n" >&2
-      printf "    make anchor-build, make anchor-test\n\n" >&2
-      ;;
-    dotnet-sdk)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    .NET 9 SDK, Protobuf toolchain\n" >&2
-      printf "    dotnet build -c Release, dotnet test -c Release\n\n" >&2
-      ;;
-    landing)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Bun, Next.js 15, Tailwind CSS, TypeScript\n" >&2
-      printf "    bun dev, bun run build\n\n" >&2
-      ;;
-    pypi)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Python 3.11-3.13, uv, ruff, mypy\n" >&2
-      printf "    Packages: resq-mcp, resq-dsa\n" >&2
-      printf "    90%% test coverage gate enforced\n\n" >&2
-      ;;
-    crates)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Rust toolchain, clippy, cargo-deny\n" >&2
-      printf "    Workspace: 9+ crates including CLI tools and resq-dsa\n\n" >&2
-      ;;
-    npm)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Bun, TypeScript, React 19, Storybook, Chromatic\n" >&2
-      printf "    Packages: @resq-sw/ui (55+ components), @resq-sw/dsa\n" >&2
-      printf "    Biome linter\n\n" >&2
-      ;;
-    vcpkg)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    C++ toolchain, CMake, clang-format\n" >&2
-      printf "    Header-only library: resq-common\n\n" >&2
-      ;;
-    docs)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Mintlify docs site\n" >&2
-      printf "    npx mint dev for local preview\n\n" >&2
-      ;;
-    viz)
-      printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
-      printf "    Three.js / Cesium web viewers (TypeScript)\n" >&2
-      printf "    Unity 3D viewer (.NET 9, ResQ.Viz.sln)\n\n" >&2
-      ;;
-  esac
+  _pri_includes="$(repo_field "$REPO" 3)"
+  [ -n "$_pri_includes" ] || return 0
+
+  printf "\n  ${BOLD}What's included:${RESET}\n\n" >&2
+
+  # Field 3 is a ';'-separated list of lines. Printed via %s rather than being
+  # baked into the format string, so a description containing a '%' is safe —
+  # the old hand-written calls had to remember to escape those as '%%', and
+  # "90%% test coverage" was the only one that did.
+  printf '%s\n' "$_pri_includes" | tr ';' '\n' | while IFS= read -r _pri_line; do
+    [ -n "$_pri_line" ] && printf '    %s\n' "$_pri_line" >&2
+  done
+
+  printf "\n" >&2
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+usage() {
+  cat >&2 <<EOF
+ResQ Developer Setup v$SCRIPT_VERSION
+
+  curl -fsSL $DIST_BASE | sh
+  sh install.sh [--help] [--version]
+
+Environment:
+  REPO=<name>        choose a repository non-interactively
+  RESQ_DIR=<path>    where to clone (default: \$HOME/resq)
+  RESQ_BIN_DIR=<p>   where to put the resq binary (default: \$HOME/.local/bin)
+  YES=1              assume yes at confirmation prompts
+  SKIP_RESQ_CLI=1    skip installing the resq binary
+  NO_COLOR=1         disable ANSI colour
+
+Repositories:
+$(printf '%s\n' "$REPOS" | awk -F'|' '{ printf "  %-12s %s\n", $1, $2 }')
+
+Verify before running:
+  curl -fsSL $DIST_BASE/install.sh | sha256sum
+  curl -fsSL $DIST_BASE/SHA256SUMS
+EOF
+}
+
+# curl drives the Nix install, the hook fetch and release downloads, but was
+# never checked for. On a machine without it the run got several steps in
+# before dying with a bare "curl: not found" from inside a pipeline.
+check_curl() {
+  has curl || fail "curl is required. Install it first, then re-run."
+  ok "curl $(curl --version 2>/dev/null | head -1 | awk '{print $2}')"
+}
+
 main() {
+  # Curl-pipe runs pass no arguments, so this loop is normally a no-op.
+  for _arg in "$@"; do
+    case "$_arg" in
+      -h|--help)    usage; exit 0 ;;
+      -V|--version) printf '%s\n' "$SCRIPT_VERSION"; exit 0 ;;
+      *)            fail "Unknown option: $_arg (try --help)" ;;
+    esac
+  done
+
   printf "\n${BOLD}  ResQ Developer Setup v%s${RESET}\n" "$SCRIPT_VERSION" >&2
   printf "  ─────────────────────────────\n\n" >&2
 
   detect_platform
   check_git
+  check_curl
   install_gh
   authenticate_gh
   install_nix
