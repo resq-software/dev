@@ -85,18 +85,31 @@ Cutting a release:
 ```sh
 echo 0.5.0 > VERSION
 sh bin/stamp.sh              # propagates into install.sh + install.ps1
-# open a PR, merge it
-git tag v0.5.0 && git push --tags
+# open a PR, merge it — that is the whole release
 ```
 
-Order matters: **stamp, merge, then tag.** The tag has to land on a commit that
-already declares its own version, or the artifacts published at `v0.5.0` would
-claim to be `v0.4.0`. `release.yml` refuses a tag that disagrees with `VERSION`.
+**Do not tag by hand.** Merging a `VERSION` change to `main` *is* the release:
+`release.yml` validates it, creates `v0.5.0` itself, publishes the Release plus
+`SHA256SUMS`, and opens the pin-bump PR. No Cloudflare credential is involved
+anywhere; Workers Builds deploys `worker/` when that PR merges, and
+`worker-live` then checks the endpoint agrees with `main`.
 
-Tagging then runs automatically, with no Cloudflare credential in GitHub:
-digests are computed from tag history, checked against what GitHub actually
-serves, published as a Release plus `SHA256SUMS`, and proposed as a pin-bump
-PR. Cloudflare Workers Builds deploys `worker/` on merge.
+Tagging is deliberately an *output* rather than a trigger. Two things make the
+obvious alternative — a workflow that pushes a tag — not work, and both are
+easy to rediscover painfully:
+
+- the `release-tags` ruleset rejects tag creation by anyone outside
+  `@resq-software/installer-maintainers`, bots included, unless the GitHub
+  Actions app is a bypass actor;
+- a tag pushed with `GITHUB_TOKEN` starts no workflow run at all, because
+  GitHub suppresses run-triggering events originating from that token.
+
+Nothing here waits on a tag, so the second rule cannot bite.
+
+Order still matters: **stamp, then merge.** The commit being released has to
+declare its own version, or artifacts published at `v0.5.0` would claim to be
+`v0.4.0`. `bin/stamp.sh --check` runs on every PR and again before the tag is
+created, so an unstamped commit never gets one.
 
 Never hand-edit a value marked `GENERATED`. `bin/stamp.sh --check` runs on
 every PR and verifies by regeneration, so a stamped value cannot be forgotten —

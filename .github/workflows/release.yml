@@ -1,26 +1,36 @@
 # Copyright 2026 ResQ Software
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tag -> verify -> publish -> propose the pin bump.
+# VERSION merged to main -> verify -> tag -> publish -> propose the pin bump.
 #
-# NO CLOUDFLARE CREDENTIALS LIVE HERE. Deployment is done by Cloudflare Workers
-# Builds, which pulls from this repository directly, so GitHub never holds a
-# key that can touch the account. This workflow only uses github.token.
+# WHY THIS RUNS ON A VERSION CHANGE, NOT ON A TAG
 #
-# WHY A TAG, AND WHY A PR
+# Earlier this was tag-triggered, on the reasoning that creating a tag was the
+# deliberate human act. That stopped being true once Cloudflare Workers Builds
+# began deploying worker/ straight from main: the act deciding what users
+# receive is now merging a reviewed change to VERSION and PINS, both
+# CODEOWNERS-gated. Tagging afterwards added no judgement, only a step that
+# could be forgotten — leaving VERSION bumped, installers stamped, and no
+# release to match.
 #
-# get.resq.software is piped into people's shells. What it serves is decided
-# entirely by the PINS block in worker/src/index.js — not by when the Worker
-# happens to deploy. So the gate that matters is code review on worker/, which
-# CODEOWNERS enforces. This workflow does the tedious half automatically
-# (compute digests, prove GitHub serves them, publish SHA256SUMS) and leaves
-# exactly one human act: approving a PR whose diff shows precisely which
-# digests change.
+# Automating a tag *push* does not work, for two reasons worth recording so
+# nobody re-derives them the hard way:
 #
-# Creating a v* tag is itself restricted to @resq-software/installer-maintainers
-# by the `release-tags` ruleset, which also blocks tag update and deletion —
-# pins resolve tags to commits, so a force-moved tag would silently repoint a
-# published version.
+#   1. The `release-tags` ruleset blocks creation of refs/tags/v* for everyone
+#      outside @resq-software/installer-maintainers, so a bot push is rejected
+#      unless the GitHub Actions app is a bypass actor.
+#   2. Even when allowed, a tag pushed with GITHUB_TOKEN does not start a
+#      workflow run. GitHub suppresses run-triggering events from that token —
+#      the same rule that would have left every pin-bump PR without its
+#      required check.
+#
+# So the trigger is inverted instead: this runs because VERSION changed, and
+# creates the tag as an *output* of its own work. Nothing needs to be triggered
+# by the tag, so (2) cannot apply. Only (1) remains, and it is a one-time
+# ruleset change.
+#
+# NO CLOUDFLARE CREDENTIALS LIVE HERE. Deployment is Workers Builds pulling from
+# this repository; GitHub never holds a key that can touch the account.
 #
 # actions/checkout is the only third-party action, at the SHA already trusted
 # elsewhere in this repo.
@@ -29,7 +39,12 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'VERSION'
+  # For re-running a release whose later stages failed. Tag creation below is
+  # idempotent, so a re-run against an already-tagged VERSION is safe.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,66 +56,105 @@ concurrency:
 
 jobs:
   verify:
-    name: verify pins
+    name: verify and tag
     runs-on: ubuntu-latest
+    permissions:
+      # Creating refs/tags/v* — the only write this job performs.
+      contents: write
     outputs:
       pins: ${{ steps.pins.outputs.json }}
-      version: ${{ steps.pins.outputs.version }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # gen-pins.sh derives the pin set from every v* tag, so shallow
           # history would silently drop older releases and 404 their URLs.
           fetch-depth: 0
-          # This job only reads history and runs scripts — it never pushes.
-          # Leaving the token in .git/config would expose it to everything the
-          # job runs, including gen-pins.sh, which makes network calls.
+          # The tag is created through the API with GH_TOKEN, not pushed from
+          # this clone, so the token never needs to sit in .git/config.
           persist-credentials: false
 
-      - name: Compute pins from tag history
-        id: pins
+      - name: Read and validate VERSION
+        id: meta
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          json="$(sh bin/gen-pins.sh --compact)"
+          version="$(tr -d ' \t\r\n' < VERSION)"
 
-          # Guard against tagging a commit gen-pins cannot see. If this fires,
-          # the tag exists but produced no artifacts, and publishing would
-          # advertise a version whose URLs 404.
-          if ! printf '%s' "$json" | jq -e --arg v "$version" '.releases[$v]' >/dev/null; then
-            echo "::error::tag $GITHUB_REF_NAME produced no pin entry for version $version"
-            exit 1
-          fi
-
-          latest="$(printf '%s' "$json" | jq -r '.latest')"
-          if [ "$latest" != "$version" ]; then
-            echo "::warning::$version is not the latest release ($latest); / will continue to serve $latest"
-          fi
+          # The same shape rule bin/stamp.sh enforces, checked again because
+          # this value becomes a git ref and a URL path segment.
+          case "$version" in
+            ''|*[!0-9.]*|.*|*.|*..*)
+              echo "::error::VERSION must look like MAJOR.MINOR.PATCH, got '$version'"; exit 1 ;;
+          esac
+          dots="$(printf '%s' "$version" | tr -cd '.' | wc -c | tr -d ' ')"
+          [ "$dots" = "2" ] || { echo "::error::VERSION must have three components, got '$version'"; exit 1; }
 
           {
-            echo "json=$json"
             echo "version=$version"
+            echo "tag=v$version"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Assert the tag matches VERSION
-        # VERSION is the single authored copy; the tag must name the same
-        # release. Stamping happens before tagging, so by the time we get here
-        # the commit should already declare its own version.
-        run: |
-          set -euo pipefail
-          want="$(tr -d ' \t\r\n' < VERSION)"
-          got="${GITHUB_REF_NAME#v}"
-          if [ "$want" != "$got" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($want). Update VERSION, run bin/stamp.sh, merge, then re-tag."
-            exit 1
-          fi
-          echo "tag $GITHUB_REF_NAME matches VERSION"
+          echo "releasing v$version from $GITHUB_SHA"
 
       - name: Assert the installers are stamped
         # Verification by regeneration: re-run the stamper and fail if anything
         # would change. Comparing individual strings would silently miss any new
-        # stamped value someone adds later; this cannot.
+        # stamped value someone adds later; this cannot. Runs before the tag is
+        # created, so a commit that fails it never gets one.
         run: sh bin/stamp.sh --check
+
+      - name: Create the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        # Idempotent on purpose. A re-run, or a maintainer who tagged by hand
+        # before merging, must not fail the release. But a tag already pointing
+        # somewhere else means this VERSION was reused for a different commit,
+        # which would republish different installers under a version people have
+        # already pinned. That is worth stopping for.
+        run: |
+          set -euo pipefail
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+
+          if [ -z "$existing" ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+            echo "created $TAG at $GITHUB_SHA"
+          elif [ "$existing" = "$GITHUB_SHA" ]; then
+            echo "$TAG already exists at this commit; continuing"
+          else
+            echo "::error::$TAG already exists at $existing but this commit is $GITHUB_SHA."
+            echo "::error::Bump VERSION rather than reusing a released version."
+            exit 1
+          fi
+
+          # gen-pins.sh reads tags from the local clone, so make the new tag
+          # visible here. Created locally rather than re-fetched: the API call
+          # above already succeeded, so this avoids depending on a fetch too.
+          git tag -f "$TAG" "$GITHUB_SHA"
+
+      - name: Compute pins from tag history
+        id: pins
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          json="$(sh bin/gen-pins.sh --compact)"
+
+          # If this fires, the tag exists but produced no artifacts, and
+          # publishing would advertise a version whose URLs 404.
+          if ! printf '%s' "$json" | jq -e --arg v "$VERSION" '.releases[$v]' >/dev/null; then
+            echo "::error::$TAG produced no pin entry for version $VERSION"
+            exit 1
+          fi
+
+          latest="$(printf '%s' "$json" | jq -r '.latest')"
+          if [ "$latest" != "$VERSION" ]; then
+            echo "::warning::$VERSION is not the latest release ($latest); / will continue to serve $latest"
+          fi
+
+          echo "json=$json" >> "$GITHUB_OUTPUT"
 
       - name: Assert GitHub serves exactly these bytes
         # Without this, a mismatch would only surface for users, whose shells
@@ -120,10 +174,11 @@ jobs:
     permissions:
       contents: write
     env:
-      # Passed via env, never interpolated into the script body, so the value
-      # can never be parsed as shell.
+      # Via env rather than inline `${{ }}` in the script body, so the value can
+      # never be parsed as shell.
       PINS: ${{ needs.verify.outputs.pins }}
       VERSION: ${{ needs.verify.outputs.version }}
+      TAG: ${{ needs.verify.outputs.tag }}
     steps:
       - name: Rebuild SHA256SUMS from the pin set
         run: |
@@ -139,6 +194,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          # Idempotent alongside the tag step: a re-run must not fail because
+          # the release already exists.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; refreshing SHA256SUMS only"
+            gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
+
           {
             echo "Installer artifacts pinned at \`$GITHUB_SHA\`."
             echo
@@ -147,12 +211,15 @@ jobs:
             echo "curl -fsSL https://get.resq.software/v$VERSION/install.sh | sh   # this release, forever"
             echo '```'
             echo
-            echo "Verify what you were served:"
+            echo "Verify what you were served, from one immutable release:"
             echo
             echo '```sh'
-            echo "curl -fsSL https://get.resq.software/install.sh | sha256sum"
-            echo "curl -fsSI https://get.resq.software | grep x-resq-sha256"
+            echo "REL=https://get.resq.software/v$VERSION"
+            echo 'curl -fsSL "$REL/SHA256SUMS"'
+            echo 'curl -fsSL "$REL/install.sh" | sha256sum'
             echo '```'
+            echo
+            echo "The endpoint keeps serving the previous release until the pin-bump PR merges and deploys."
             echo
             echo '### SHA256SUMS'
             echo
@@ -160,9 +227,9 @@ jobs:
             cat SHA256SUMS
             echo '```'
           } > NOTES.md
-          gh release create "$GITHUB_REF_NAME" SHA256SUMS \
+          gh release create "$TAG" SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
+            --title "$TAG" \
             --notes-file NOTES.md
 
   bump:
@@ -172,8 +239,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # Required to dispatch required.yml after the push. See the step below
-      # for why a dispatch is the only mechanism that actually works here.
+      # Required to dispatch required.yml after the push. See that step for why
+      # a dispatch is the only mechanism that actually works.
       actions: write
     env:
       VERSION: ${{ needs.verify.outputs.version }}
@@ -190,6 +257,9 @@ jobs:
         id: bump
         run: |
           set -euo pipefail
+          # The tag was created by the verify job, after this checkout's view of
+          # the repository was taken, so fetch it before deriving pins.
+          git fetch --tags --force origin
           sh bin/gen-pins.sh --write
           if git diff --quiet -- worker/src/index.js; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -215,21 +285,25 @@ jobs:
 
           # --force-with-lease compares against the remote-tracking ref, which
           # does not exist here unless we fetch it first: `ref: main` above only
-          # brought down main. Without this, the lease has nothing to check and
+          # brought down main. Without this the lease has nothing to check and
           # the push is rejected on any re-run of a release.
           git fetch origin "$branch" || echo "no existing $branch on origin"
           git push --force-with-lease origin "$branch"
 
-          gh pr create \
-            --repo "$GITHUB_REPOSITORY" \
-            --base main \
-            --head "$branch" \
-            --title "chore(worker): pin get.resq.software to v$VERSION" \
-            --body "Regenerated by \`bin/gen-pins.sh --write\` from tag \`v$VERSION\`.
+          if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "PR for $branch already open; updated in place"
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$branch" \
+              --title "chore(worker): pin get.resq.software to v$VERSION" \
+              --body "Regenerated by \`bin/gen-pins.sh --write\` from tag \`v$VERSION\`.
 
-          Merging this is what changes the bytes \`curl -fsSL https://get.resq.software | sh\` serves. Cloudflare Workers Builds deploys on merge.
+          Merging this is what changes the bytes \`curl -fsSL https://get.resq.software | sh\` serves. Cloudflare Workers Builds deploys on merge, and \`worker-live\` then verifies the endpoint agrees with main.
 
           Digests were already verified against raw.githubusercontent.com in the \`verify\` job of this release, and \`SHA256SUMS\` is published on the [release](../../releases/tag/v$VERSION). Review the diff below against it."
+          fi
 
       - name: Dispatch the required checks for the bump branch
         if: steps.bump.outputs.changed == 'true'
@@ -238,9 +312,9 @@ jobs:
         # Neither the PR nor the push above starts a workflow run: GitHub
         # suppresses run-triggering events originating from GITHUB_TOKEN, and
         # that applies to push just as much as to pull_request. An earlier
-        # version of this workflow relied on a push trigger for
-        # release/pins-*, which would have left every bump PR permanently
-        # missing its `required` check and therefore unmergeable.
+        # version relied on a push trigger for release/pins-*, which would have
+        # left every bump PR permanently missing its `required` check and so
+        # unmergeable.
         #
         # workflow_dispatch and repository_dispatch are the documented
         # exceptions, so we ask for the run explicitly. Check runs attach to the
