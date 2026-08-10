@@ -1,0 +1,122 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fail when the installers' repo list stops matching the organisation.
+#
+# `landing` went private while still being offered as menu option 7. Nothing
+# noticed, because the list was hand-maintained in three places across two
+# files. Whoever ran the installer next chose option 7 and got a clone failure.
+#
+# The membership rule is deliberately mechanical so a machine can check it:
+#
+#     public, non-archived, non-fork repositories in the org,
+#     excluding `.github`
+#
+# Archived is part of the rule, not an implementation detail: an archived
+# repository is read-only, so offering it to clone-and-hack would be a dead end.
+# The query below passes --no-archived, and this line has to keep saying so or
+# the check silently enforces something other than what it documents.
+#
+# This job re-derives that set from the GitHub API and diffs it against what the
+# installers actually offer. It runs on PRs touching the installers (catching
+# the change that causes drift) and on a schedule (catching drift from someone
+# flipping a repository's visibility, which produces no commit at all).
+
+name: repo-drift
+
+on:
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/repo-drift.yml'
+  schedule:
+    # Mondays 07:23 UTC. Off the hour so it does not queue behind the stampede
+    # of jobs everyone schedules at :00.
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: installer repo list matches the org
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read-only job; matches every other workflow in this repo.
+          persist-credentials: false
+
+      - name: Compare the installers against the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # What the org actually has. Filtered with --jq rather than in the
+          # shell, so a description containing a quote or newline cannot
+          # corrupt the list.
+          gh repo list resq-software --limit 200 --no-archived \
+            --json name,isPrivate,isFork \
+            --jq '.[] | select(.isPrivate == false) | select(.isFork == false) | .name' \
+            | grep -vx '\.github' | sort -u > actual.txt
+
+          # What install.sh offers: field 1 of every REPOS record, read from the
+          # live table. Re-listing the repos here would just create a fourth
+          # place to drift.
+          # [$] rather than \$ : both match a literal dollar, but \$ inside
+          # single quotes trips shellcheck SC2016, which actionlint treats as
+          # a failure. A bracket expression says the same thing without needing
+          # a suppression comment.
+          sed -n '/^REPOS="[$](cat <<.EOF.$/,/^EOF$/p' install.sh \
+            | grep -v '^REPOS=' | grep -v '^EOF$' \
+            | cut -d'|' -f1 | grep -v '^$' | sort -u > sh.txt
+
+          # What install.ps1 offers. Scoped to the $Repos block on purpose:
+          # matching `Name = '...'` across the whole file also picks up
+          # $binName assignments like 'resq' and 'resq.exe'.
+          sed -n '/^[$]Repos = @($/,/^)$/p' install.ps1 \
+            | grep -oE "Name = '[^']+'" \
+            | sed "s/Name = '//; s/'//" | sort -u > ps1.txt
+
+          echo "::group::org (public, non-fork, excluding .github)"; cat actual.txt; echo "::endgroup::"
+          echo "::group::install.sh";  cat sh.txt;  echo "::endgroup::"
+          echo "::group::install.ps1"; cat ps1.txt; echo "::endgroup::"
+
+          rc=0
+
+          # Guard against an extractor silently matching nothing after a
+          # refactor: an empty list "agrees" with an empty list, so the job
+          # would pass while checking nothing at all.
+          for f in actual.txt sh.txt ps1.txt; do
+            if [ ! -s "$f" ]; then
+              echo "::error::$f is empty — the extractor in this workflow no longer matches the file it parses"
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] || exit 1
+
+          if ! diff -u sh.txt ps1.txt > /dev/null; then
+            echo "::error::install.sh and install.ps1 offer different repositories"
+            diff -u sh.txt ps1.txt || true
+            rc=1
+          fi
+
+          if ! diff -u actual.txt sh.txt > /dev/null; then
+            echo "::error::the installer repo list does not match the organisation"
+            echo "  '-' lines exist in the org but are not offered; '+' lines are offered but should not be."
+            diff -u actual.txt sh.txt || true
+            echo
+            echo "Fix: update the REPOS table in install.sh and \$Repos in install.ps1."
+            echo "A repository going private is the usual cause — see 'landing'."
+            rc=1
+          fi
+
+          [ "$rc" -eq 0 ] && echo "ok — installers offer exactly the public non-fork repositories"
+          exit "$rc"

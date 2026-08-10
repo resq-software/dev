@@ -10,8 +10,17 @@ name: required
 
 on:
   push:
-    branches: [main, master]
+    # release/pins-* is listed so that a human pushing a fix onto a bump branch
+    # gets checks. It does NOT cover the bot's own push: GitHub suppresses
+    # run-triggering events originating from GITHUB_TOKEN, and that applies to
+    # push exactly as it does to pull_request. release.yml therefore calls
+    # `gh workflow run required.yml --ref <branch>` after pushing, because
+    # workflow_dispatch is one of the two documented exceptions.
+    branches: [main, master, 'release/pins-*']
   pull_request:
+  # Load-bearing. This is how the pin-bump PR gets its `required` check without
+  # a PAT or GitHub App secret. Remove it and those PRs become unmergeable.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       # Errors only for now (repo has pre-existing warning debt); -x follows
@@ -35,11 +47,22 @@ jobs:
           find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*'
           -exec shellcheck -S error -x {} +
 
+      # Catch drift on the PR that causes it rather than at tag time. VERSION is
+      # the only authored copy of the version; SCRIPT_VERSION, $ScriptVersion
+      # and both hook digests are generated from it and from the hook files.
+      # Editing scripts/install-hooks.* without re-stamping would otherwise ship
+      # installers that reject the very file they are meant to run.
+      - name: Installers stamped from VERSION
+        run: sh bin/stamp.sh --check
+
   powershell:
     name: PowerShell parse + analyze (*.ps1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
       - name: Parse-check (gating) + PSScriptAnalyzer (advisory)
         shell: pwsh
         run: |
@@ -62,9 +85,27 @@ jobs:
           } catch { Write-Host "PSScriptAnalyzer skipped: $($_.Exception.Message)" }
           if ($fail) { throw 'PowerShell parse errors found' }
 
+  worker:
+    name: worker (get.resq.software)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
+      # Also validates the inline PINS fallback in worker/src/index.js: with no
+      # RESQ_PINS override the suite exercises those pins against live GitHub,
+      # so digests that have rotted surface here as a 502 rather than in
+      # production, where the Worker would correctly refuse to serve anything.
+      - name: Worker test suite
+        run: |
+          set -euo pipefail
+          node --version
+          node worker/test/index.test.mjs
+
   required:
     name: required
-    needs: [shellcheck, powershell]
+    needs: [shellcheck, powershell, worker]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +114,8 @@ jobs:
           set -euo pipefail
           for r in \
             "shellcheck=${{ needs.shellcheck.result }}" \
-            "powershell=${{ needs.powershell.result }}"; do
+            "powershell=${{ needs.powershell.result }}" \
+            "worker=${{ needs.worker.result }}"; do
             name=${r%%=*}; res=${r#*=}
             echo "$name: $res"
             [ "$res" = "success" ] || { echo "::error::required check '$name' did not pass"; exit 1; }

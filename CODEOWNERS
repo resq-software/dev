@@ -1,4 +1,14 @@
-# Only org owners can modify the install script
-* @WomB0ComB0
-install.sh @WomB0ComB0
-install.ps1 @WomB0ComB0
+# Intentionally empty of rules. Not the active CODEOWNERS.
+#
+# When CODEOWNERS exists in more than one location, GitHub uses only the first
+# it finds, searching .github/ -> root -> docs/. This repository has one at
+# .github/CODEOWNERS, so every rule written here is silently ignored.
+#
+# That is a quiet trap: edits here look correct, get reviewed, merge, and
+# protect nothing. This file is left in place as a signpost rather than deleted,
+# so anyone who goes looking for CODEOWNERS at the root is sent to the real one
+# instead of finding nothing and creating a second set of rules.
+#
+# The active rules live in:
+#
+#     .github/CODEOWNERS

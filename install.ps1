@@ -31,12 +31,45 @@ $ErrorActionPreference = 'Stop'
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-$ScriptVersion  = '0.3.0'
+# GENERATED — stamped from VERSION by bin/stamp.sh. Do not edit by hand: CI
+# re-runs the stamper and fails if the committed value differs.
+$ScriptVersion  = '0.4.0'
 $Org            = 'resq-software'
 $NixInstallUrl  = 'https://install.determinate.systems/nix'
 
-# Canonical repo list — keep in sync with install.sh and README.md.
-$ValidRepos = @('programs','dotnet-sdk','pypi','crates','npm','vcpkg','landing','docs','viz')
+# Pinned, hash-verified distribution endpoint (see worker/src/index.js). It
+# serves one specific commit and refuses to serve anything whose SHA-256 does
+# not match, which is why it beats raw.githubusercontent.com's mutable /main.
+$DistBase       = 'https://get.resq.software'
+
+# GENERATED — SHA-256 of scripts/install-hooks.ps1 at this version, checked
+# before that file is ever executed. Stamped by bin/stamp.sh.
+$HooksSha256    = '4976c3920f5e2c5e6d347ed791d00119f46152c946a6f8186a98690deef9dd23'
+
+# Canonical repo table — one source of truth for the menu, validation and the
+# post-install summary. Those used to be three separate lists that could
+# disagree, and did: `landing` went private while still being offered as menu
+# option 7, so choosing it failed at clone time.
+#
+# Scope is mechanical so CI can verify it: public, non-archived, non-fork
+# repositories in the org, excluding `.github`. Archived is part of the rule
+# rather than an oversight — an archived repo is read-only, so offering it to
+# clone-and-hack would be a dead end.
+# Keep in sync with install.sh and README.md.
+$Repos = @(
+    [pscustomobject]@{ Name = 'crates'    ; Desc = 'Rust workspace (CLI + DSA)'     ; Includes = @('Rust toolchain, clippy, cargo-deny', 'Workspace: 9+ crates including CLI tools and resq-dsa') }
+    [pscustomobject]@{ Name = 'dev'       ; Desc = 'Developer setup + installers'   ; Includes = @('POSIX sh + PowerShell installers, Cloudflare Worker', 'shellcheck install.sh, node worker/test/index.test.mjs') }
+    [pscustomobject]@{ Name = 'docs'      ; Desc = 'Documentation site'             ; Includes = @('Mintlify docs site', 'npx mint dev for local preview') }
+    [pscustomobject]@{ Name = 'dotnet-sdk'; Desc = '.NET client libraries'          ; Includes = @('.NET 9 SDK, Protobuf toolchain', 'dotnet build -c Release, dotnet test -c Release') }
+    [pscustomobject]@{ Name = 'npm'       ; Desc = 'TypeScript packages (UI + DSA)' ; Includes = @('Bun, TypeScript, React 19, Storybook, Chromatic', 'Packages: @resq-sw/ui (55+ components), @resq-sw/dsa', 'Biome linter') }
+    [pscustomobject]@{ Name = 'programs'  ; Desc = 'Solana/Anchor on-chain programs'; Includes = @('Solana CLI, Anchor framework, Rust toolchain', 'make anchor-build, make anchor-test') }
+    [pscustomobject]@{ Name = 'pypi'      ; Desc = 'Python packages (MCP + DSA)'    ; Includes = @('Python 3.11-3.13, uv, ruff, mypy', 'Packages: resq-mcp, resq-dsa', '90% test coverage gate enforced') }
+    [pscustomobject]@{ Name = 'vcpkg'     ; Desc = 'C++ libraries'                  ; Includes = @('C++ toolchain, CMake, clang-format', 'Header-only library: resq-common') }
+    [pscustomobject]@{ Name = 'viz'       ; Desc = '3D visualization'               ; Includes = @('Three.js / Cesium web viewers (TypeScript)', 'Unity 3D viewer (.NET 9, ResQ.Viz.sln)') }
+)
+
+# Derived, so it can never drift from the table above.
+$ValidRepos = $Repos.Name
 
 # ── Platform flag ────────────────────────────────────────────────────────────
 
@@ -255,32 +288,40 @@ function Select-Repo {
         Write-Fail "No interactive host for prompt. Use -Repo <name> or `$env:REPO to run unattended. Valid: $($ValidRepos -join ', ')"
     }
 
-    Write-Host ''
-    Write-Host '  Which repo do you want to work on?' -ForegroundColor White
-    Write-Host ''
-    Write-Host '  ' -NoNewline; Write-Host ' 1' -ForegroundColor Cyan -NoNewline; Write-Host '  programs      Solana/Anchor on-chain programs'
-    Write-Host '  ' -NoNewline; Write-Host ' 2' -ForegroundColor Cyan -NoNewline; Write-Host '  dotnet-sdk    .NET client libraries'
-    Write-Host '  ' -NoNewline; Write-Host ' 3' -ForegroundColor Cyan -NoNewline; Write-Host '  pypi          Python packages (MCP + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 4' -ForegroundColor Cyan -NoNewline; Write-Host '  crates        Rust workspace (CLI + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 5' -ForegroundColor Cyan -NoNewline; Write-Host '  npm           TypeScript packages (UI + DSA)'
-    Write-Host '  ' -NoNewline; Write-Host ' 6' -ForegroundColor Cyan -NoNewline; Write-Host '  vcpkg         C++ libraries'
-    Write-Host '  ' -NoNewline; Write-Host ' 7' -ForegroundColor Cyan -NoNewline; Write-Host '  landing       Marketing site'
-    Write-Host '  ' -NoNewline; Write-Host ' 8' -ForegroundColor Cyan -NoNewline; Write-Host '  docs          Documentation site'
-    Write-Host '  ' -NoNewline; Write-Host ' 9' -ForegroundColor Cyan -NoNewline; Write-Host '  viz           3D visualization (Three.js/Cesium + Unity)'
-    Write-Host ''
-    $choice = Read-Host '  Choice [1-9]'
+    # Loop rather than abort. A typo here used to end the whole run — after gh,
+    # Nix and a package-manager pass had already completed — forcing the user to
+    # start over for a mistyped digit.
+    while ($true) {
+        Write-Host ''
+        Write-Host '  Which repo do you want to work on?' -ForegroundColor White
+        Write-Host ''
 
-    $script:Repo = switch ($choice) {
-        '1' { 'programs' }
-        '2' { 'dotnet-sdk' }
-        '3' { 'pypi' }
-        '4' { 'crates' }
-        '5' { 'npm' }
-        '6' { 'vcpkg' }
-        '7' { 'landing' }
-        '8' { 'docs' }
-        '9' { 'viz' }
-        default { Write-Fail "Invalid choice: $choice" }
+        # Numbered from the table itself, so the list can grow past 9 entries
+        # without the prompt and the mapping drifting apart.
+        for ($i = 0; $i -lt $Repos.Count; $i++) {
+            Write-Host '  ' -NoNewline
+            Write-Host ('{0,2}' -f ($i + 1)) -ForegroundColor Cyan -NoNewline
+            Write-Host ('  {0,-12} {1}' -f $Repos[$i].Name, $Repos[$i].Desc)
+        }
+
+        Write-Host ''
+        $choice = (Read-Host "  Choice [1-$($Repos.Count), or a name]").Trim()
+
+        # Exact name match first, then a positional index. -eq on strings is a
+        # literal comparison, so a typed value can never act as a wildcard the
+        # way it could with -like or -match.
+        $picked = $Repos | Where-Object { $_.Name -eq $choice } | Select-Object -First 1
+        if (-not $picked -and $choice -match '^[0-9]+$') {
+            $idx = [int]$choice
+            if ($idx -ge 1 -and $idx -le $Repos.Count) { $picked = $Repos[$idx - 1] }
+        }
+
+        if ($picked) {
+            $script:Repo = $picked.Name
+            return
+        }
+
+        Write-Warn "Not a valid choice: $choice"
     }
 }
 
@@ -334,14 +375,68 @@ function Initialize-Repo {
             try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
             Write-Ok 'Git hooks configured'
         } else {
-            # Fallback (cloned repo isn't dev). TODO: pin to a tag/SHA + verify a
-            # SHA256 before executing to close the TOFU gap.
-            $hooksUrl = "https://raw.githubusercontent.com/$Org/dev/main/scripts/install-hooks.ps1"
-            $reRun = "irm $hooksUrl | iex"
-            $sb = [ScriptBlock]::Create((Invoke-RestMethod -Uri $hooksUrl -UseBasicParsing))
-            Push-Location $script:TargetDir
-            try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
-            Write-Ok 'Git hooks configured'
+            # No local copy (the cloned repo isn't `dev`), so fetch one.
+            #
+            # This was `irm .../dev/main/scripts/install-hooks.ps1 | iex` — a
+            # plain remote code execution path: /main is mutable, nothing was
+            # verified, and the response was turned straight into a ScriptBlock.
+            # Now the download is pinned to this script's own version and its
+            # SHA-256 checked before anything is executed.
+            #
+            # /v$ScriptVersion/ rather than bare /hooks.ps1 on purpose: an
+            # install.ps1 from an older release must verify against the digest it
+            # shipped with, not against whatever the newest release publishes.
+            $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+            try {
+                $dest = Join-Path $tmpDir 'install-hooks.ps1'
+
+                # The endpoint may simply be down; the digest check is what
+                # provides safety here, not the choice of host, and v* tags
+                # cannot be moved or deleted under the `release-tags` ruleset.
+                $sources = @(
+                    "$DistBase/v$ScriptVersion/hooks.ps1"
+                    "https://raw.githubusercontent.com/$Org/dev/v$ScriptVersion/scripts/install-hooks.ps1"
+                )
+
+                $verified = $false
+                foreach ($url in $sources) {
+                    try {
+                        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -ErrorAction Stop
+                    } catch {
+                        continue
+                    }
+                    $got = (Get-FileHash -Path $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+                    if ($got -eq $HooksSha256) {
+                        $verified = $true
+                        # Deliberately NOT "irm $url | iex". That is the
+                        # unverified pipe-to-execute path this whole block
+                        # exists to remove, and printing it as the recovery
+                        # hint would hand the guarantee straight back for
+                        # anyone who follows it. Point at verified routes.
+                        $reRun = 'resq hooks install   # or re-run this installer'
+                        break
+                    }
+                    Write-Warn "checksum mismatch for $url"
+                    Write-Warn "  expected $HooksSha256"
+                    Write-Warn "  got      $got"
+                    Remove-Item -Force $dest -ErrorAction SilentlyContinue
+                }
+
+                if (-not $verified) {
+                    Write-Warn 'Could not obtain a verified install-hooks.ps1 - skipping hook setup'
+                    Write-Warn "  Set them up later with: cd $($script:TargetDir); resq hooks install"
+                    return
+                }
+
+                $sb = [ScriptBlock]::Create((Get-Content -Raw -Path $dest))
+                Push-Location $script:TargetDir
+                try { & $sb -TargetDir $script:TargetDir } finally { Pop-Location }
+                Write-Ok "Git hooks configured (verified $($HooksSha256.Substring(0, 12))...)"
+            }
+            finally {
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+            }
         }
     } catch {
         Write-Warn "Hook install failed - re-run:  cd $($script:TargetDir); $reRun"
@@ -515,82 +610,16 @@ function Install-ResqCompletions {
 }
 
 function Show-RepoInfo {
-    switch ($script:Repo) {
-        'programs' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Solana CLI, Anchor framework, Rust toolchain'
-            Write-Host '    make anchor-build, make anchor-test'
-            Write-Host ''
-        }
-        'dotnet-sdk' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    .NET 9 SDK, Protobuf toolchain'
-            Write-Host '    dotnet build -c Release, dotnet test -c Release'
-            Write-Host ''
-        }
-        'landing' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Bun, Next.js 15, Tailwind CSS, TypeScript'
-            Write-Host '    bun dev, bun run build'
-            Write-Host ''
-        }
-        'pypi' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Python 3.11-3.13, uv, ruff, mypy'
-            Write-Host '    Packages: resq-mcp, resq-dsa'
-            Write-Host '    90% test coverage gate enforced'
-            Write-Host ''
-        }
-        'crates' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Rust toolchain, clippy, cargo-deny'
-            Write-Host '    Workspace: 9+ crates including CLI tools and resq-dsa'
-            Write-Host ''
-        }
-        'npm' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Bun, TypeScript, React 19, Storybook, Chromatic'
-            Write-Host '    Packages: @resq-sw/ui (55+ components), @resq-sw/dsa'
-            Write-Host '    Biome linter'
-            Write-Host ''
-        }
-        'vcpkg' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    C++ toolchain, CMake, clang-format'
-            Write-Host '    Header-only library: resq-common'
-            Write-Host ''
-        }
-        'docs' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Mintlify docs site'
-            Write-Host '    npx mint dev for local preview'
-            Write-Host ''
-        }
-        'viz' {
-            Write-Host ''
-            Write-Host '  What''s included:' -ForegroundColor White
-            Write-Host ''
-            Write-Host '    Three.js / Cesium web viewers (TypeScript)'
-            Write-Host '    Unity 3D viewer (.NET 9, ResQ.Viz.sln)'
-            Write-Host ''
-        }
+    $entry = $Repos | Where-Object { $_.Name -eq $script:Repo } | Select-Object -First 1
+    if (-not $entry) { return }
+
+    Write-Host ''
+    Write-Host '  What''s included:' -ForegroundColor White
+    Write-Host ''
+    foreach ($line in $entry.Includes) {
+        Write-Host "    $line"
     }
+    Write-Host ''
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────

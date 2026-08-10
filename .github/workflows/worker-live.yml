@@ -1,0 +1,146 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Assert that what get.resq.software actually serves matches what `main` says.
+#
+# release.yml verifies digests before publishing. Nothing verified them
+# afterwards, so every failure mode past that point was invisible: a Workers
+# Builds deploy that silently did not run, a deploy of the wrong directory, a
+# pin bump merged but never shipped, or an endpoint quietly failing closed
+# because its pins went stale.
+#
+# The invariant is deliberately end-to-end and cheap to state:
+#
+#   the bytes on the wire hash to the digest the deployed Worker advertises,
+#   and that digest is the one `main` currently declares.
+#
+# Both halves matter. The first catches a Worker serving corrupted or
+# substituted content; the second catches a Worker that is honest but stale.
+#
+# Runs on push to main (Workers Builds deploys from there, so this is the
+# confirmation) and daily — the endpoint can rot with no commit involved, for
+# instance if GitHub stops serving a pinned commit.
+
+name: worker-live
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - '.github/workflows/worker-live.yml'
+  schedule:
+    # Daily 06:41 UTC, off the hour to avoid the scheduling stampede.
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: live endpoint matches main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read-only job; matches every other workflow in this repo.
+          persist-credentials: false
+
+      - name: Compare the live endpoint against this commit
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          const ORIGIN = "https://get.resq.software";
+
+          // Run main's Worker in-process to learn what it *would* serve. This
+          // beats parsing the PINS block out of the source: the module itself
+          // decides, so the check cannot drift from the implementation.
+          globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
+          const worker = (await import("./worker/src/index.js")).default;
+          const ctx = { waitUntil: (p) => p.catch(() => {}) };
+          const localRes = await worker.fetch(new Request(`${ORIGIN}/manifest.json`), {}, ctx);
+          const local = JSON.parse(await localRes.text());
+
+          const want = local.artifacts["install.sh"].sha256;
+          console.log(`main declares v${local.version} @ ${local.commit.slice(0, 8)} (install.sh ${want.slice(0, 12)})`);
+
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const sha256 = async (buf) => {
+            const d = await crypto.subtle.digest("SHA-256", buf);
+            return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+          };
+
+          // A push to main starts a Workers Builds deploy that finishes on its
+          // own schedule, so converge rather than sampling once. When PINS did
+          // not change, the first attempt already matches and this exits at once.
+          let live = null;
+          for (let attempt = 1; attempt <= 12; attempt++) {
+            try {
+              const r = await fetch(`${ORIGIN}/manifest.json`, { cache: "no-store" });
+              if (r.ok) {
+                live = await r.json();
+                if (live.commit === local.commit && live.version === local.version) break;
+                console.log(`attempt ${attempt}: live v${live.version} @ ${String(live.commit).slice(0, 8)}, waiting for v${local.version} @ ${local.commit.slice(0, 8)}`);
+              } else {
+                console.log(`attempt ${attempt}: manifest HTTP ${r.status}`);
+              }
+            } catch (e) {
+              console.log(`attempt ${attempt}: ${e.message}`);
+            }
+            await sleep(15000);
+          }
+
+          const fail = (msg) => { console.log(`::error::${msg}`); process.exit(1); };
+
+          if (!live) fail("could not read a manifest from the live endpoint");
+          if (live.commit !== local.commit || live.version !== local.version) {
+            fail(`live endpoint serves v${live.version} @ ${String(live.commit).slice(0, 8)} but main declares v${local.version} @ ${local.commit.slice(0, 8)} — the deploy did not land`);
+          }
+
+          // Every advertised digest must agree, not only install.sh: a partial
+          // deploy could update one artifact and not another.
+          for (const [name, meta] of Object.entries(local.artifacts)) {
+            const liveMeta = live.artifacts && live.artifacts[name];
+            if (meta.sha256 && (!liveMeta || liveMeta.sha256 !== meta.sha256)) {
+              fail(`digest for ${name} differs: live ${liveMeta && liveMeta.sha256} vs main ${meta.sha256}`);
+            }
+          }
+
+          // The manifest is a claim. This is the part that checks the claim, and
+          // it does so for every published route — checking only install.sh
+          // would miss a partial deploy in which the installer is correct but
+          // hooks.sh or install.ps1 is stale, and those are executed too.
+          let verified = 0;
+          for (const [route, meta] of Object.entries(local.artifacts)) {
+            if (!meta.sha256) continue;
+            const res = await fetch(`${ORIGIN}/${route}`, { cache: "no-store" });
+            if (!res.ok) fail(`${route} returned HTTP ${res.status}`);
+            const bytes = new Uint8Array(await res.arrayBuffer());
+            const got = await sha256(bytes);
+            const header = res.headers.get("x-resq-sha256");
+
+            if (got !== meta.sha256) fail(`${route}: served bytes hash to ${got}, expected ${meta.sha256}`);
+            if (header !== meta.sha256) fail(`${route}: x-resq-sha256 is ${header}, expected ${meta.sha256}`);
+            if (bytes.byteLength === 0) fail(`${route}: served an empty body`);
+            verified++;
+            console.log(`  ${route.padEnd(14)} ${got.slice(0, 12)} ok`);
+          }
+
+          if (verified === 0) fail("no artifacts were verified — the manifest advertised none");
+
+          // Sanity-check the shape of the thing people actually pipe to a shell,
+          // so a 200 carrying an HTML error page cannot pass as an installer.
+          const shRes = await fetch(`${ORIGIN}/`, { cache: "no-store" });
+          const shBody = new Uint8Array(await shRes.arrayBuffer());
+          if (!new TextDecoder().decode(shBody.slice(0, 9)).startsWith("#!/bin/sh")) {
+            fail("the root route does not serve something that looks like the installer");
+          }
+          if (await sha256(shBody) !== want) fail("the root route and /install.sh disagree");
+
+          console.log(`ok - ${ORIGIN} serves v${live.version} @ ${live.commit.slice(0, 8)}, ${verified} artifacts verified`);
+          JS

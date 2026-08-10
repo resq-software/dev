@@ -7,12 +7,25 @@ Centralized developer onboarding for ResQ Software. One curl command installs to
 ## Workspace Layout
 
 ```
+VERSION           — The single authored version. Everything else is stamped.
 install.sh        — Bash installer (Linux/macOS), curl-pipeable
 install.ps1       — PowerShell installer (Windows/WSL/macOS/Linux)
 flake.nix         — Skeleton dev shell each repo extends
-CODEOWNERS        — Ownership rules
 AGENTS.md         — Canonical dev guide (this file)
 CLAUDE.md         — Claude-specific extensions
+.github/CODEOWNERS — Ownership rules. THE ACTIVE ONE: GitHub reads the first
+                    CODEOWNERS it finds (.github/ -> root -> docs/), so rules
+                    written in the root copy are silently ignored.
+CODEOWNERS        — Inert signpost pointing at .github/CODEOWNERS
+bin/              — Maintainer tools. Deliberately NOT scripts/: everything in
+                    scripts/ is an artifact the Worker serves to users, and
+                    nothing in bin/ ever should be.
+  gen-pins.sh     — Derives the Worker pin set from every v* tag
+  stamp.sh        — Propagates VERSION + hook digests into both installers
+worker/           — get.resq.software: pinned, hash-verified distribution
+  src/index.js    — The Worker. PINS decides which bytes users receive.
+  wrangler.jsonc  — Deploy manifest; `name` must match the live Worker
+  test/           — node worker/test/index.test.mjs
 scripts/
   setup.sh        — Post-clone environment bootstrap (bash)
   setup.ps1       — Post-clone environment bootstrap (powershell, mirrors setup.sh)
@@ -50,6 +63,44 @@ shellcheck install.sh  # Lint the bash script
 - install.sh starts as `#!/bin/sh`, re-execs under bash if available for pipefail + better error traps, falls back to POSIX sh
 - Repo list is inline data, not external config
 - All logging goes to stderr so curl-pipe stdout stays clean
+
+## Distribution and releases
+
+`curl -fsSL https://get.resq.software | sh` is a remote code execution
+primitive by design. The only question that matters is *whose* code, so:
+
+- The Worker fetches by **40-char commit SHA**, never a branch or tag. Branches
+  move on every push; tags can be force-moved.
+- It **SHA-256 verifies every byte** against digests baked in at deploy. On
+  mismatch it returns 502 and serves no installer bytes — the body is a short
+  shell snippet that prints an error and exits 1, so a `curl | sh` that omitted
+  `-f` still fails loudly instead of executing prose. There is no degraded mode
+  that serves unverified content.
+- Therefore **merging to `main` ships nothing.** What users receive is decided
+  by the `PINS` block in `worker/src/index.js`, which changes only via a
+  reviewed PR. That is the gate — not the deploy trigger.
+
+Cutting a release:
+
+```sh
+echo 0.5.0 > VERSION
+sh bin/stamp.sh              # propagates into install.sh + install.ps1
+# open a PR, merge it
+git tag v0.5.0 && git push --tags
+```
+
+Order matters: **stamp, merge, then tag.** The tag has to land on a commit that
+already declares its own version, or the artifacts published at `v0.5.0` would
+claim to be `v0.4.0`. `release.yml` refuses a tag that disagrees with `VERSION`.
+
+Tagging then runs automatically, with no Cloudflare credential in GitHub:
+digests are computed from tag history, checked against what GitHub actually
+serves, published as a Release plus `SHA256SUMS`, and proposed as a pin-bump
+PR. Cloudflare Workers Builds deploys `worker/` on merge.
+
+Never hand-edit a value marked `GENERATED`. `bin/stamp.sh --check` runs on
+every PR and verifies by regeneration, so a stamped value cannot be forgotten —
+forgetting it is a diff.
 
 ## Standards
 
