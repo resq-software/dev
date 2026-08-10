@@ -14,7 +14,30 @@
 
 ```bash
 # Default clone target is ~/resq; override with RESQ_DIR=...
-curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
+curl -fsSL https://get.resq.software | sh
+```
+
+This endpoint is not a redirect to `main`. It serves one pinned commit and
+SHA-256 verifies every byte before sending it; on mismatch it returns 502 and
+serves nothing. Pushing to `main` does not change what you get here — only a
+tagged release does.
+
+You do not have to take that on faith:
+
+```bash
+# What you were served, and what it should be
+curl -fsSL https://get.resq.software/install.sh | sha256sum
+curl -fsSL https://get.resq.software/SHA256SUMS
+
+# Or just read it before running it
+curl -fsSL https://get.resq.software/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+Pin to an exact release, which never changes:
+
+```bash
+curl -fsSL https://get.resq.software/v0.4.0/install.sh | sh
 ```
 
 What happens, in order:
@@ -31,7 +54,14 @@ Run unattended (CI / provisioning):
 
 ```bash
 REPO=npm YES=1 RESQ_DIR=/srv/work \
-  curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/install.sh | sh
+  curl -fsSL https://get.resq.software | sh
+```
+
+For provisioning, prefer a version-pinned URL so a later release cannot change
+what your machines install without you deciding to:
+
+```bash
+REPO=npm YES=1 curl -fsSL https://get.resq.software/v0.4.0/install.sh | sh
 ```
 
 ---
@@ -46,12 +76,18 @@ REPO=npm YES=1 RESQ_DIR=/srv/work \
 | [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA + `resq` binary) | Rust |
 | [`npm`](https://github.com/resq-software/npm) | TypeScript packages (UI + DSA) | TypeScript |
 | [`vcpkg`](https://github.com/resq-software/vcpkg) | C++ libraries | C++ |
-| [`viz`](https://github.com/resq-software/viz) | Visualization library (.NET) | C# |
-| [`landing`](https://github.com/resq-software/landing) | Marketing site | TypeScript |
+| [`viz`](https://github.com/resq-software/viz) | 3D visualization — Three.js/Cesium web + Unity | TypeScript / C# |
 | [`docs`](https://github.com/resq-software/docs) | Documentation site | MDX |
 | [`dev`](https://github.com/resq-software/dev) | This repo — install scripts and onboarding | Shell / PowerShell |
 
 Public repos sync to the monorepo automatically.
+
+This table is the public, non-fork set (excluding `.github`), and it is the same
+list the installers offer. `landing` used to appear here and in the installer
+menu; it is now private, so choosing it failed at clone time. The rule is
+mechanical on purpose — `repo-drift.yml` re-derives it from the GitHub API and
+fails when this list and reality disagree, so the next such change is caught by
+CI rather than by whoever runs the installer next.
 
 ---
 
@@ -61,15 +97,26 @@ Each script can be run on its own without going through the full onboarding flow
 
 | Script | Use case | Bootstrap |
 |---|---|---|
-| `install.sh` / `install.ps1` | Full onboarding — installs prereqs, clones a repo, sets up dev env + hooks | `curl -fsSL .../install.sh \| sh` |
-| `install-hooks.sh` / `install-hooks.ps1` | Drop the canonical git hooks into any repo. Asks to scaffold `local-pre-push` if `resq` is on PATH | `cd <repo> && curl -fsSL .../install-hooks.sh \| sh` |
-| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git` if no release asset matches the host platform | `curl -fsSL .../install-resq.sh \| sh` |
+| `install.sh` / `install.ps1` | Full onboarding — installs prereqs, clones a repo, sets up dev env + hooks | `curl -fsSL https://get.resq.software \| sh` |
+| `install-hooks.sh` / `install-hooks.ps1` | Drop the canonical git hooks into any repo. Asks to scaffold `local-pre-push` if `resq` is on PATH | `cd <repo> && curl -fsSL https://get.resq.software/hooks.sh \| sh` |
+| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git` if no release asset matches the host platform | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
+
+Every one of these is served pinned and hash-verified, and each has a
+version-locked form — `https://get.resq.software/v0.4.0/hooks.sh` and so on.
+`https://get.resq.software/SHA256SUMS` lists the digest of all of them.
 
 Common env vars across all of them:
-- `RESQ_DEV_REF=<sha\|tag>` — pin to a specific revision instead of rolling `main`
 - `YES=1` — skip prompts (CI / provisioning)
 - `GIT_HOOKS_SKIP=1` — disable installed hooks for a session
 - `RESQ_SKIP_LOCAL_SCAFFOLD=1` — opt out of the `local-pre-push` scaffold prompt
+
+To pin a revision, use a version-locked URL rather than an environment
+variable. (This section previously documented `RESQ_DEV_REF=<sha|tag>`; no
+script has ever implemented it, so it silently did nothing.)
+
+`install.sh` additionally honours `REPO`, `RESQ_DIR`, `RESQ_BIN_DIR`,
+`SKIP_RESQ_CLI` and `NO_COLOR` — run `sh install.sh --help` for the current
+list.
 
 ---
 
@@ -83,9 +130,9 @@ Common env vars across all of them:
 | crates | Rust | `cargo build` |
 | npm | TypeScript | `bun install` |
 | vcpkg | C++ | `cmake --preset default` |
-| viz | C# / .NET 9 | `dotnet restore` |
-| landing | Next.js | `bun install && bun dev` |
+| viz | TypeScript / C# | `bun install` · `dotnet restore` |
 | docs | MDX / Mintlify | `mintlify dev` |
+| dev | Shell / PowerShell | `shellcheck install.sh` · `node worker/test/index.test.mjs` |
 
 
 ## Contributor guide
