@@ -71,8 +71,11 @@ primitive by design. The only question that matters is *whose* code, so:
 
 - The Worker fetches by **40-char commit SHA**, never a branch or tag. Branches
   move on every push; tags can be force-moved.
-- It **SHA-256 verifies every byte** against digests baked in at deploy, and
-  502s having served nothing on mismatch. There is no degraded mode.
+- It **SHA-256 verifies every byte** against digests baked in at deploy. On
+  mismatch it returns 502 and serves no installer bytes — the body is a short
+  shell snippet that prints an error and exits 1, so a `curl | sh` that omitted
+  `-f` still fails loudly instead of executing prose. There is no degraded mode
+  that serves unverified content.
 - Therefore **merging to `main` ships nothing.** What users receive is decided
   by the `PINS` block in `worker/src/index.js`, which changes only via a
   reviewed PR. That is the gate — not the deploy trigger.

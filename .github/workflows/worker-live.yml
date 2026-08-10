@@ -47,6 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read-only job; matches every other workflow in this repo.
+          persist-credentials: false
 
       - name: Compare the live endpoint against this commit
         run: |
@@ -108,19 +111,36 @@ jobs:
             }
           }
 
-          // The manifest is a claim. This is the part that checks the claim:
-          // fetch the real script and hash what actually came back.
-          const res = await fetch(`${ORIGIN}/install.sh`, { cache: "no-store" });
-          if (!res.ok) fail(`install.sh returned HTTP ${res.status}`);
-          const bytes = new Uint8Array(await res.arrayBuffer());
-          const got = await sha256(bytes);
-          const header = res.headers.get("x-resq-sha256");
+          // The manifest is a claim. This is the part that checks the claim, and
+          // it does so for every published route — checking only install.sh
+          // would miss a partial deploy in which the installer is correct but
+          // hooks.sh or install.ps1 is stale, and those are executed too.
+          let verified = 0;
+          for (const [route, meta] of Object.entries(local.artifacts)) {
+            if (!meta.sha256) continue;
+            const res = await fetch(`${ORIGIN}/${route}`, { cache: "no-store" });
+            if (!res.ok) fail(`${route} returned HTTP ${res.status}`);
+            const bytes = new Uint8Array(await res.arrayBuffer());
+            const got = await sha256(bytes);
+            const header = res.headers.get("x-resq-sha256");
 
-          if (got !== want) fail(`served bytes hash to ${got}, expected ${want}`);
-          if (header !== want) fail(`x-resq-sha256 is ${header}, expected ${want}`);
-          if (!new TextDecoder().decode(bytes.slice(0, 9)).startsWith("#!/bin/sh")) {
-            fail("served content does not look like the installer");
+            if (got !== meta.sha256) fail(`${route}: served bytes hash to ${got}, expected ${meta.sha256}`);
+            if (header !== meta.sha256) fail(`${route}: x-resq-sha256 is ${header}, expected ${meta.sha256}`);
+            if (bytes.byteLength === 0) fail(`${route}: served an empty body`);
+            verified++;
+            console.log(`  ${route.padEnd(14)} ${got.slice(0, 12)} ok`);
           }
 
-          console.log(`ok - ${ORIGIN} serves v${live.version} @ ${live.commit.slice(0, 8)}, install.sh verified ${got}`);
+          if (verified === 0) fail("no artifacts were verified — the manifest advertised none");
+
+          // Sanity-check the shape of the thing people actually pipe to a shell,
+          // so a 200 carrying an HTML error page cannot pass as an installer.
+          const shRes = await fetch(`${ORIGIN}/`, { cache: "no-store" });
+          const shBody = new Uint8Array(await shRes.arrayBuffer());
+          if (!new TextDecoder().decode(shBody.slice(0, 9)).startsWith("#!/bin/sh")) {
+            fail("the root route does not serve something that looks like the installer");
+          }
+          if (await sha256(shBody) !== want) fail("the root route and /install.sh disagree");
+
+          console.log(`ok - ${ORIGIN} serves v${live.version} @ ${live.commit.slice(0, 8)}, ${verified} artifacts verified`);
           JS

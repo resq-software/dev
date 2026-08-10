@@ -59,9 +59,15 @@ esac
 # Tolerate a trailing newline and stray whitespace, reject anything else. A
 # malformed version gets stamped into a URL that then 404s at install time.
 VERSION="$(tr -d ' \t\r\n' < VERSION)"
+# Rejecting only non-numeric characters was too loose: '1..2', '...' and
+# '1.2.3.4' all passed. Each becomes a URL path segment (/v$VERSION/hooks.ps1)
+# that would 404 on a user's machine at install time, so validate the shape.
 case "$VERSION" in
-  ''|*[!0-9.]*) die "VERSION must be a dotted numeric version, got '$VERSION'" ;;
+  ''|*[!0-9.]*|.*|*.|*..*)
+    die "VERSION must look like MAJOR.MINOR.PATCH, got '$VERSION'" ;;
 esac
+_dots="$(printf '%s' "$VERSION" | tr -cd '.' | wc -c | tr -d ' ')"
+[ "$_dots" = "2" ] || die "VERSION must have exactly three components, got '$VERSION'"
 
 for f in install.sh install.ps1 scripts/install-hooks.sh scripts/install-hooks.ps1; do
   [ -f "$f" ] || die "$f not found — run from the repository root"

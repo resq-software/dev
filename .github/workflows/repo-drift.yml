@@ -9,7 +9,13 @@
 #
 # The membership rule is deliberately mechanical so a machine can check it:
 #
-#     public, non-fork repositories in the org, excluding `.github`
+#     public, non-archived, non-fork repositories in the org,
+#     excluding `.github`
+#
+# Archived is part of the rule, not an implementation detail: an archived
+# repository is read-only, so offering it to clone-and-hack would be a dead end.
+# The query below passes --no-archived, and this line has to keep saying so or
+# the check silently enforces something other than what it documents.
 #
 # This job re-derives that set from the GitHub API and diffs it against what the
 # installers actually offer. It runs on PRs touching the installers (catching
@@ -43,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read-only job; matches every other workflow in this repo.
+          persist-credentials: false
 
       - name: Compare the installers against the GitHub API
         env:

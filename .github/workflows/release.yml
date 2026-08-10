@@ -52,6 +52,10 @@ jobs:
           # gen-pins.sh derives the pin set from every v* tag, so shallow
           # history would silently drop older releases and 404 their URLs.
           fetch-depth: 0
+          # This job only reads history and runs scripts — it never pushes.
+          # Leaving the token in .git/config would expose it to everything the
+          # job runs, including gen-pins.sh, which makes network calls.
+          persist-credentials: false
 
       - name: Compute pins from tag history
         id: pins
@@ -168,9 +172,15 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Required to dispatch required.yml after the push. See the step below
+      # for why a dispatch is the only mechanism that actually works here.
+      actions: write
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
+      # The one checkout in this repo that legitimately keeps the token: this
+      # job pushes the bump branch. Every other checkout sets
+      # persist-credentials: false.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -197,15 +207,17 @@ jobs:
           set -euo pipefail
           branch="release/pins-v$VERSION"
 
-          # required.yml also runs on push for release/pins-* precisely because
-          # a PR opened with github.token does not trigger workflow runs. Status
-          # checks bind to the commit SHA, so the push-triggered run satisfies
-          # the PR's required check without needing a PAT or an app secret.
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add worker/src/index.js
           git commit -m "chore(worker): pin get.resq.software to v$VERSION"
+
+          # --force-with-lease compares against the remote-tracking ref, which
+          # does not exist here unless we fetch it first: `ref: main` above only
+          # brought down main. Without this, the lease has nothing to check and
+          # the push is rejected on any re-run of a release.
+          git fetch origin "$branch" || echo "no existing $branch on origin"
           git push --force-with-lease origin "$branch"
 
           gh pr create \
@@ -218,3 +230,24 @@ jobs:
           Merging this is what changes the bytes \`curl -fsSL https://get.resq.software | sh\` serves. Cloudflare Workers Builds deploys on merge.
 
           Digests were already verified against raw.githubusercontent.com in the \`verify\` job of this release, and \`SHA256SUMS\` is published on the [release](../../releases/tag/v$VERSION). Review the diff below against it."
+
+      - name: Dispatch the required checks for the bump branch
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Neither the PR nor the push above starts a workflow run: GitHub
+        # suppresses run-triggering events originating from GITHUB_TOKEN, and
+        # that applies to push just as much as to pull_request. An earlier
+        # version of this workflow relied on a push trigger for
+        # release/pins-*, which would have left every bump PR permanently
+        # missing its `required` check and therefore unmergeable.
+        #
+        # workflow_dispatch and repository_dispatch are the documented
+        # exceptions, so we ask for the run explicitly. Check runs attach to the
+        # branch head SHA, which is the PR's head, so the PR sees the result.
+        # This keeps the whole flow free of a PAT or GitHub App secret.
+        run: |
+          set -euo pipefail
+          branch="release/pins-v$VERSION"
+          gh workflow run required.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          echo "dispatched required.yml against $branch"

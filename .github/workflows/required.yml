@@ -10,14 +10,17 @@ name: required
 
 on:
   push:
-    # release/pins-* is listed deliberately. The pin-bump PR from release.yml is
-    # opened with github.token, and GitHub does not trigger workflow runs for
-    # events from that token — so a pull_request run never happens and the PR
-    # could never satisfy its required check. Status checks bind to the commit
-    # SHA, so this push-triggered run supplies the `required` context instead.
-    # That avoids needing a PAT or GitHub App secret purely to unblock a bot PR.
+    # release/pins-* is listed so that a human pushing a fix onto a bump branch
+    # gets checks. It does NOT cover the bot's own push: GitHub suppresses
+    # run-triggering events originating from GITHUB_TOKEN, and that applies to
+    # push exactly as it does to pull_request. release.yml therefore calls
+    # `gh workflow run required.yml --ref <branch>` after pushing, because
+    # workflow_dispatch is one of the two documented exceptions.
     branches: [main, master, 'release/pins-*']
   pull_request:
+  # Load-bearing. This is how the pin-bump PR gets its `required` check without
+  # a PAT or GitHub App secret. Remove it and those PRs become unmergeable.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,6 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       # Errors only for now (repo has pre-existing warning debt); -x follows
@@ -54,6 +60,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
       - name: Parse-check (gating) + PSScriptAnalyzer (advisory)
         shell: pwsh
         run: |
@@ -81,6 +90,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # None of these jobs push; matches every other workflow in the repo.
+          persist-credentials: false
       # Also validates the inline PINS fallback in worker/src/index.js: with no
       # RESQ_PINS override the suite exercises those pins against live GitHub,
       # so digests that have rotted surface here as a 502 rather than in

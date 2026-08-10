@@ -18,21 +18,32 @@ curl -fsSL https://get.resq.software | sh
 ```
 
 This endpoint is not a redirect to `main`. It serves one pinned commit and
-SHA-256 verifies every byte before sending it; on mismatch it returns 502 and
-serves nothing. Pushing to `main` does not change what you get here — only a
-tagged release does.
+SHA-256 verifies every byte before sending it; on mismatch it returns 502 with a
+shell snippet that exits non-zero, never installer bytes.
 
-You do not have to take that on faith:
+Merging to `main` does not by itself change what you get here. What you receive
+is decided by the pinned digests in `worker/src/index.js`, so it changes only
+when a reviewed pin bump merges and deploys — which follows a tagged release
+rather than happening at the moment of tagging.
+
+You do not have to take that on faith. Verify against a single immutable
+release, so the installer and the digest list cannot describe different
+versions:
 
 ```bash
-# What you were served, and what it should be
-curl -fsSL https://get.resq.software/install.sh | sha256sum
-curl -fsSL https://get.resq.software/SHA256SUMS
+REL=https://get.resq.software/v0.4.0
+
+curl -fsSL "$REL/SHA256SUMS"
+curl -fsSL "$REL/install.sh" | sha256sum   # must match the install.sh line
 
 # Or just read it before running it
-curl -fsSL https://get.resq.software/install.sh -o install.sh
+curl -fsSL "$REL/install.sh" -o install.sh
 less install.sh && sh install.sh
 ```
+
+The unversioned paths work too, but a deploy landing between the two requests
+would leave you comparing an installer from one release against digests from
+another.
 
 Pin to an exact release, which never changes:
 
@@ -82,8 +93,8 @@ REPO=npm YES=1 curl -fsSL https://get.resq.software/v0.4.0/install.sh | sh
 
 Public repos sync to the monorepo automatically.
 
-This table is the public, non-fork set (excluding `.github`), and it is the same
-list the installers offer. `landing` used to appear here and in the installer
+This table is the public, non-archived, non-fork set (excluding `.github`), and
+it is the same list the installers offer. `landing` used to appear here and in the installer
 menu; it is now private, so choosing it failed at clone time. The rule is
 mechanical on purpose — `repo-drift.yml` re-derives it from the GitHub API and
 fails when this list and reality disagree, so the next such change is caught by

@@ -86,8 +86,11 @@ HOOKS_SHA256="24bd874dd27ff55153be602a5ad7fb366f4283ae4423323f8fd2bc2af442c68a"
 #
 #   name|one-line description|what's included, ';' separating lines
 #
-# Scope is mechanical so CI can verify it: public, non-fork repositories in the
-# org, excluding `.github`. Keep in sync with install.ps1 and README.md.
+# Scope is mechanical so CI can verify it: public, non-archived, non-fork
+# repositories in the org, excluding `.github`. Archived is part of the rule
+# rather than an oversight — an archived repo is read-only, so offering it to
+# clone-and-hack would be a dead end.
+# Keep in sync with install.ps1 and README.md.
 REPOS="$(cat <<'EOF'
 crates|Rust workspace (CLI + DSA)|Rust toolchain, clippy, cargo-deny;Workspace: 9+ crates including CLI tools and resq-dsa
 dev|Developer setup + installers|POSIX sh + PowerShell installers, Cloudflare Worker;shellcheck install.sh, node worker/test/index.test.mjs

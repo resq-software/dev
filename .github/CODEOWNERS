@@ -18,7 +18,13 @@
 # Default owner for everything not matched by a more specific rule.
 *                         @resq-software/installer-maintainers
 
-# The paths that actually reach a user's shell. Most specific match wins.
+# The paths that actually reach a user's shell.
+#
+# Order matters, though not in the way it first looks: GitHub applies the LAST
+# matching pattern, not the most specific one. These entries work because they
+# come after `*`, not because they are narrower. Anything added below them that
+# also matches would silently take them over, and multiple owners for one
+# pattern must share a single line rather than stack on consecutive ones.
 /install.sh               @resq-software/installer-maintainers
 /install.ps1              @resq-software/installer-maintainers
 /scripts/                 @resq-software/installer-maintainers

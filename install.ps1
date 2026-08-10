@@ -51,8 +51,11 @@ $HooksSha256    = '4976c3920f5e2c5e6d347ed791d00119f46152c946a6f8186a98690deef9d
 # disagree, and did: `landing` went private while still being offered as menu
 # option 7, so choosing it failed at clone time.
 #
-# Scope is mechanical so CI can verify it: public, non-fork repositories in the
-# org, excluding `.github`. Keep in sync with install.sh and README.md.
+# Scope is mechanical so CI can verify it: public, non-archived, non-fork
+# repositories in the org, excluding `.github`. Archived is part of the rule
+# rather than an oversight — an archived repo is read-only, so offering it to
+# clone-and-hack would be a dead end.
+# Keep in sync with install.sh and README.md.
 $Repos = @(
     [pscustomobject]@{ Name = 'crates'    ; Desc = 'Rust workspace (CLI + DSA)'     ; Includes = @('Rust toolchain, clippy, cargo-deny', 'Workspace: 9+ crates including CLI tools and resq-dsa') }
     [pscustomobject]@{ Name = 'dev'       ; Desc = 'Developer setup + installers'   ; Includes = @('POSIX sh + PowerShell installers, Cloudflare Worker', 'shellcheck install.sh, node worker/test/index.test.mjs') }
@@ -406,7 +409,12 @@ function Initialize-Repo {
                     $got = (Get-FileHash -Path $dest -Algorithm SHA256).Hash.ToLowerInvariant()
                     if ($got -eq $HooksSha256) {
                         $verified = $true
-                        $reRun = "irm $url | iex"
+                        # Deliberately NOT "irm $url | iex". That is the
+                        # unverified pipe-to-execute path this whole block
+                        # exists to remove, and printing it as the recovery
+                        # hint would hand the guarantee straight back for
+                        # anyone who follows it. Point at verified routes.
+                        $reRun = 'resq hooks install   # or re-run this installer'
                         break
                     }
                     Write-Warn "checksum mismatch for $url"

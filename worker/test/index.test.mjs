@@ -54,7 +54,15 @@ console.log("\n== happy path ==");
   const r = await call("/");
   const body = await r.text();
   check("GET / -> 200", r.status === 200, `got ${r.status}`);
-  check("content-type is shellscript", r.headers.get("content-type").includes("x-shellscript"));
+  // ?? "" because a missing content-type would throw on .includes() and abort
+  // the whole suite with a TypeError, reporting a crash instead of the failed
+  // assertion that actually matters. Every other header check here uses === or
+  // RegExp.test, both of which already tolerate null.
+  check(
+    "content-type is shellscript",
+    (r.headers.get("content-type") ?? "").includes("x-shellscript"),
+    r.headers.get("content-type") ?? "(absent)",
+  );
   check("body is the installer", body.startsWith("#!/bin/sh"));
   check("served bytes match advertised digest", (await digestOf(body)) === EXPECTED_SH);
   check("x-resq-sha256 header correct", r.headers.get("x-resq-sha256") === EXPECTED_SH);
