@@ -168,5 +168,52 @@ console.log("\n== conditional + HEAD ==");
   check("stale ETag -> 200", stale.status === 200);
 }
 
+console.log("\n== survives without the Cache API ==");
+{
+  // This shipped once. An unguarded `caches.default` throws a ReferenceError
+  // when Cache is disabled in the Worker's runtime settings, so every artifact
+  // route 500'd while /manifest.json — which needs no cache — kept answering,
+  // making the deploy look healthy. Caching is an optimisation; what we serve
+  // must not depend on it.
+  const saved = globalThis.caches;
+  // eslint-disable-next-line no-delete-var
+  delete globalThis.caches;
+  try {
+    const r = await call("/");
+    const body = await r.text();
+    check("no Cache API -> still 200", r.status === 200, `got ${r.status}`);
+    check("no Cache API -> correct bytes", (await digestOf(body)) === EXPECTED_SH);
+    const h = await call("/hooks.sh");
+    check("no Cache API -> hooks.sh 200", h.status === 200, `got ${h.status}`);
+  } finally {
+    globalThis.caches = saved;
+  }
+}
+
+console.log("\n== unhandled errors stay inert ==");
+{
+  // A throw escaping the handler becomes a runtime 500 whose body is the host's
+  // HTML error page — which a `curl | sh` would execute. Every deliberate
+  // failure path returns shell that exits 1; the accidental one must too.
+  const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+  crypto.subtle.digest = () => {
+    throw new Error("synthetic failure");
+  };
+  let status, body, cacheControl;
+  try {
+    const r = await call("/");
+    status = r.status;
+    cacheControl = r.headers.get("cache-control");
+    body = await r.text();
+  } finally {
+    crypto.subtle.digest = realDigest;
+  }
+  check("internal throw -> 500", status === 500, `got ${status}`);
+  check("internal throw -> inert shell", body.startsWith("#!/bin/sh") && body.includes("exit 1"));
+  check("internal throw -> not HTML", !body.includes("<html"), body.slice(0, 40));
+  check("internal throw -> not cached", cacheControl === "no-store");
+  check("internal throw -> leaks no installer bytes", !body.includes("SCRIPT_VERSION"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

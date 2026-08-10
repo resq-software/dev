@@ -247,11 +247,37 @@ function route(pathname) {
 // Returns verified bytes, or null if anything at all was off. Verified bodies
 // are cached by commit+path, so the digest is computed once per artifact per
 // edge rather than once per request.
+// The Cache API is an optimisation and nothing more, so every use of it is
+// guarded. It can be genuinely absent: a Worker with Cache disabled in its
+// runtime settings has no `caches` binding at all, and merely referencing it
+// throws a ReferenceError. An earlier version of this file assumed it was
+// always present, which turned "cache unavailable" into an unhandled exception
+// and a 500 on every artifact route, while /manifest.json — which needs no
+// cache — kept working and made the Worker look healthy.
+async function cacheMatch(key) {
+  try {
+    if (typeof caches === "undefined" || !caches.default) return undefined;
+    return await caches.default.match(key);
+  } catch {
+    return undefined;
+  }
+}
+
+function cachePut(ctx, key, response) {
+  try {
+    if (typeof caches === "undefined" || !caches.default) return;
+    // put() can throw synchronously, which would escape ctx.waitUntil and fail
+    // the request — hence the surrounding try, not merely a .catch().
+    ctx.waitUntil(caches.default.put(key, response).catch(() => {}));
+  } catch {
+    /* best-effort only; never let caching change what we serve */
+  }
+}
+
 async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
-  const cache = caches.default;
   const cacheKey = new Request(`https://pin.resq.internal/${commit}/${repoPath}`);
 
-  const cached = await cache.match(cacheKey);
+  const cached = await cacheMatch(cacheKey);
   if (cached) {
     const bytes = new Uint8Array(await cached.arrayBuffer());
     // Re-verify on the way out of cache. Cheap, and it means a poisoned or
@@ -274,11 +300,10 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
 
   if (!digestsEqual(await sha256Hex(bytes), expectedDigest)) return null;
 
-  ctx.waitUntil(
-    cache.put(
-      cacheKey,
-      new Response(bytes, { headers: { "cache-control": "public, max-age=86400" } }),
-    ),
+  cachePut(
+    ctx,
+    cacheKey,
+    new Response(bytes, { headers: { "cache-control": "public, max-age=86400" } }),
   );
   return bytes;
 }
@@ -321,6 +346,25 @@ function manifest(config, version, release) {
 
 export default {
   async fetch(request, env, ctx) {
+    // Any exception escaping here becomes a runtime 500 whose body is
+    // Cloudflare's HTML error page — which is exactly what someone's `curl | sh`
+    // would then execute. Every deliberate failure path in this file returns an
+    // inert shell body precisely to avoid that, so an unhandled throw must not
+    // be the one route that bypasses it.
+    try {
+      return await handle(request, env, ctx);
+    } catch (err) {
+      console.error(
+        JSON.stringify({ event: "unhandled_error", message: String(err && err.message) }),
+      );
+      const asShell = !request.url.endsWith(".ps1") && !request.url.endsWith(".json");
+      return errorResponse(500, "internal error - refusing to serve", asShell);
+    }
+  },
+};
+
+async function handle(request, env, ctx) {
+  {
     const url = new URL(request.url);
     const isShellPath = !url.pathname.endsWith(".ps1") && !url.pathname.endsWith(".json");
 
@@ -399,5 +443,5 @@ export default {
         "x-resq-source": `github:${REPO}@${release.commit}/${meta.path}`,
       },
     });
-  },
-};
+  }
+}
