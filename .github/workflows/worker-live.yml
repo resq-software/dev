@@ -78,8 +78,15 @@ jobs:
           // A push to main starts a Workers Builds deploy that finishes on its
           // own schedule, so converge rather than sampling once. When PINS did
           // not change, the first attempt already matches and this exits at once.
+          //
+          // 8 minutes, not the 3 this started with. A real deploy overran the
+          // shorter window and the check reported "the deploy did not land"
+          // while the deploy was simply still running; re-running it unchanged
+          // passed. A check that cries wolf gets ignored exactly when it is
+          // telling the truth, and this one had just caught two genuine
+          // outages. Better to wait longer than to spend that credibility.
           let live = null;
-          for (let attempt = 1; attempt <= 12; attempt++) {
+          for (let attempt = 1; attempt <= 32; attempt++) {
             try {
               const r = await fetch(`${ORIGIN}/manifest.json`, { cache: "no-store" });
               if (r.ok) {
