@@ -109,7 +109,13 @@ jobs:
           set -euo pipefail
           url="$(sed -n 's/^NIX_INSTALL_URL="\(.*\)"$/\1/p' install.sh)"
           want="$(sed -n 's/^NIX_INSTALLER_SHA256="\(.*\)"$/\1/p' install.sh)"
-          [ -n "$url" ] && [ -n "$want" ] || { echo "::error::could not read the Nix pin from install.sh"; exit 1; }
+          # An explicit if, not `A && B || C` — shellcheck flags that as SC2015
+          # because C also runs when A succeeds and B fails, which is a genuine
+          # trap even where, as here, it happened to be the behaviour wanted.
+          if [ -z "$url" ] || [ -z "$want" ]; then
+            echo "::error::could not read the Nix pin from install.sh"
+            exit 1
+          fi
 
           actual="$(curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$url" | sha256sum | cut -d' ' -f1)"
           if [ "$actual" != "$want" ]; then
