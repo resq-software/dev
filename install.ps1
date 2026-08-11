@@ -261,6 +261,14 @@ function Install-Nix {
                 return
             }
             bash -c "sh '$nixInstaller' install --no-confirm"
+            # A native command's failure does not throw in PowerShell, so
+            # without this the run continues and reports success. Verifying the
+            # download says the script is authentic, not that it worked.
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "The Nix installer exited $LASTEXITCODE — continuing without Nix."
+                Write-Warn '  Retry manually: https://determinate.systems/nix'
+                return
+            }
         }
         finally {
             Remove-Item -Recurse -Force $nixStage -ErrorAction SilentlyContinue

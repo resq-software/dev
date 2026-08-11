@@ -118,15 +118,29 @@ jobs:
             exit 1
           fi
 
-          # All three copies must agree, or one silently stops matching and only
-          # some entry points break.
+          # All FOUR copies must agree. install.ps1 declares its own
+          # $NixInstallUrl and $NixInstallerSha256, so checking only the two
+          # libs would let the Windows entry point drift while this job passes —
+          # and drift there means Windows users get a different installer than
+          # everyone else, which is the failure this check exists to prevent.
           rc=0
+
+          ps_url="$(sed -n "s/.*\$NixInstallUrl *= *'\([^']*\)'.*/\1/p" install.ps1 | head -1)"
+          ps_sha="$(sed -n "s/.*\$NixInstallerSha256 *= *'\([^']*\)'.*/\1/p" install.ps1 | head -1)"
+          if [ -z "$ps_url" ] || [ -z "$ps_sha" ]; then
+            echo "::error::could not read the Nix pin from install.ps1 — the extraction here no longer matches the file"
+            rc=1
+          else
+            [ "$ps_url" = "$url" ]  || { echo "::error::install.ps1 pins URL $ps_url, install.sh pins $url"; rc=1; }
+            [ "$ps_sha" = "$want" ] || { echo "::error::install.ps1 pins digest $ps_sha, install.sh pins $want"; rc=1; }
+          fi
+
           for f in scripts/lib/nix.sh scripts/lib/nix.ps1; do
             grep -q "$want" "$f" || { echo "::error::$f does not carry the pinned digest $want"; rc=1; }
             grep -q "$url"  "$f" || { echo "::error::$f does not carry the pinned URL $url"; rc=1; }
           done
 
-          [ "$rc" -eq 0 ] && echo "ok — Nix installer pin agrees across install.sh and both libs"
+          [ "$rc" -eq 0 ] && echo "ok — Nix installer pin agrees across install.sh, install.ps1 and both libs"
           exit "$rc"
 
       - name: gen-pins missing-PINS guard is reachable

@@ -387,7 +387,15 @@ install_nix() {
       warn "  Install it yourself: https://determinate.systems/nix"
       return 0
     fi
-    sh "$_nix_installer" install
+    # Check the installer's exit status. Verifying the download says the script
+    # is authentic, not that it worked — and setting NIX_JUST_INSTALLED after a
+    # failed run would print "Nix was just installed" and a PATH hint for a Nix
+    # that is not there.
+    if ! sh "$_nix_installer" install; then
+      warn "The Nix installer failed — continuing without Nix."
+      warn "  Retry manually: https://determinate.systems/nix"
+      return 0
+    fi
     NIX_JUST_INSTALLED=1
 
     # Source nix in current shell (this script's process only; see note above).

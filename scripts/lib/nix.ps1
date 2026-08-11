@@ -34,6 +34,12 @@ function Install-Nix {
         }
         Log-Info 'Running official Nix multi-user installer...'
         bash -c "sh '$installer' install --no-confirm"
+        # Native command failure does not throw in PowerShell; without this the
+        # function falls through and reports a successful install.
+        if ($LASTEXITCODE -ne 0) {
+            Log-Error "Nix installer exited $LASTEXITCODE."
+            return $false
+        }
     }
     finally {
         Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
