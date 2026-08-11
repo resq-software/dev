@@ -110,11 +110,7 @@ write_source() {
   target="worker/src/index.js"
   [ -f "$target" ] || die "$target not found — run from the repository root"
 
-  # `|| true` is load-bearing: grep -c exits 1 when the count is zero, the
-  # command substitution inherits that status, and `set -e` kills the script
-  # right here — so the die below could never report the real problem. The
-  # guard existed but was unreachable in precisely the case it was written for.
-  occurrences="$(grep -c '^const PINS = {' "$target" || true)"
+  occurrences="$(grep -c '^const PINS = {' "$target")"
   [ "$occurrences" = "1" ] || die "expected exactly one 'const PINS = {' in $target, found $occurrences"
 
   start="$(grep -n '^const PINS = {' "$target" | cut -d: -f1)"
