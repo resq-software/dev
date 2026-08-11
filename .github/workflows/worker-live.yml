@@ -45,6 +45,10 @@ jobs:
   live:
     name: live endpoint matches main
     runs-on: ubuntu-latest
+    # Backstop. The script enforces its own 8-minute deadline; this bounds the
+    # job even if the script itself misbehaves, rather than inheriting GitHub's
+    # 6-hour default and quietly burning runner time on a stuck check.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,10 +82,34 @@ jobs:
           // A push to main starts a Workers Builds deploy that finishes on its
           // own schedule, so converge rather than sampling once. When PINS did
           // not change, the first attempt already matches and this exits at once.
+          //
+          // 8 minutes, not the 3 this started with. A real deploy overran the
+          // shorter window and the check reported "the deploy did not land"
+          // while the deploy was simply still running; re-running it unchanged
+          // passed. A check that cries wolf gets ignored exactly when it is
+          // telling the truth, and this one had just caught two genuine
+          // outages. Better to wait longer than to spend that credibility.
+          // Enforced as an absolute wall-clock deadline, not a count of sleeps.
+          // Counting attempts only bounds the time spent *sleeping*: fetch has
+          // no default timeout in Node, so one hung connection would stall the
+          // loop indefinitely and "8 minutes" would be a claim rather than a
+          // limit. Each request gets its own timeout, and the loop never sleeps
+          // past the deadline or after its final attempt.
+          const DEADLINE_MS = 8 * 60 * 1000;
+          const POLL_MS = 15_000;
+          const REQUEST_TIMEOUT_MS = 10_000;
+          const startedAt = Date.now();
+          const remaining = () => DEADLINE_MS - (Date.now() - startedAt);
+
           let live = null;
-          for (let attempt = 1; attempt <= 12; attempt++) {
+          let attempt = 0;
+          while (remaining() > 0) {
+            attempt++;
             try {
-              const r = await fetch(`${ORIGIN}/manifest.json`, { cache: "no-store" });
+              const r = await fetch(`${ORIGIN}/manifest.json`, {
+                cache: "no-store",
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+              });
               if (r.ok) {
                 live = await r.json();
                 if (live.commit === local.commit && live.version === local.version) break;
@@ -92,7 +120,13 @@ jobs:
             } catch (e) {
               console.log(`attempt ${attempt}: ${e.message}`);
             }
-            await sleep(15000);
+            const left = remaining();
+            if (left <= 0) break;
+            await sleep(Math.min(POLL_MS, left));
+          }
+
+          if (!live || live.commit !== local.commit || live.version !== local.version) {
+            console.log(`gave up after ${attempt} attempts in ${Math.round((Date.now() - startedAt) / 1000)}s`);
           }
 
           const fail = (msg) => { console.log(`::error::${msg}`); process.exit(1); };
@@ -118,7 +152,12 @@ jobs:
           let verified = 0;
           for (const [route, meta] of Object.entries(local.artifacts)) {
             if (!meta.sha256) continue;
-            const res = await fetch(`${ORIGIN}/${route}`, { cache: "no-store" });
+            // Same reasoning as the poll loop: an untimed fetch here would hang
+            // the job past any deadline the loop above enforced.
+            const res = await fetch(`${ORIGIN}/${route}`, {
+              cache: "no-store",
+              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            });
             if (!res.ok) fail(`${route} returned HTTP ${res.status}`);
             const bytes = new Uint8Array(await res.arrayBuffer());
             const got = await sha256(bytes);
@@ -135,7 +174,7 @@ jobs:
 
           // Sanity-check the shape of the thing people actually pipe to a shell,
           // so a 200 carrying an HTML error page cannot pass as an installer.
-          const shRes = await fetch(`${ORIGIN}/`, { cache: "no-store" });
+          const shRes = await fetch(`${ORIGIN}/`, { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
           const shBody = new Uint8Array(await shRes.arrayBuffer());
           if (!new TextDecoder().decode(shBody.slice(0, 9)).startsWith("#!/bin/sh")) {
             fail("the root route does not serve something that looks like the installer");
