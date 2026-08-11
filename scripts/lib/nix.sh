@@ -44,45 +44,63 @@ install_nix() {
     # Bump both lines together; required.yml re-checks the digest.
     local nix_url="https://install.determinate.systems/nix/tag/v3.21.9"
     local nix_sha="ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6"
-    local nix_tmp nix_got
-    nix_tmp="$(mktemp -d)" || { log_error "Could not create a temporary directory."; return 1; }
-    trap 'rm -rf "$nix_tmp"' RETURN
 
+    # Download, verify and run inside a subshell with an EXIT trap rather than a
+    # RETURN trap in this function.
+    #
+    # A RETURN trap set inside a function is not confined to it. Verified: with
+    # `set -T` (functrace) it persists and fires on unrelated later returns; it
+    # silently replaces any RETURN trap the caller had installed; and under
+    # `set -u` the now-out-of-scope temp variable makes it abort with "unbound
+    # variable". These are library functions meant to be sourced, so a caller
+    # enabling functrace is a realistic thing to break.
+    #
+    # A subshell EXIT trap cannot escape, and takes the temp directory with it.
     log_info "Downloading pinned Nix installer..."
-    if ! curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        "$nix_url" -o "$nix_tmp/nix-installer.sh"; then
-        log_error "Could not download the Nix installer."
-        return 1
-    fi
-    if command_exists sha256sum; then
-        nix_got="$(sha256sum "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
-    else
-        nix_got="$(shasum -a 256 "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
-    fi
-    if [ "$nix_got" != "$nix_sha" ]; then
-        log_error "Nix installer checksum mismatch — refusing to run it."
-        log_error "  expected $nix_sha"
-        log_error "  got      $nix_got"
+    if ! (
+        set -e
+        nix_tmp="$(mktemp -d)"
+        trap 'rm -rf "$nix_tmp"' EXIT
+
+        if ! curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            "$nix_url" -o "$nix_tmp/nix-installer.sh"; then
+            log_error "Could not download the Nix installer."
+            exit 1
+        fi
+        if command_exists sha256sum; then
+            nix_got="$(sha256sum "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
+        else
+            nix_got="$(shasum -a 256 "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
+        fi
+        if [ "$nix_got" != "$nix_sha" ]; then
+            log_error "Nix installer checksum mismatch — refusing to run it."
+            log_error "  expected $nix_sha"
+            log_error "  got      $nix_got"
+            exit 1
+        fi
+
+        log_info "Running official Nix multi-user install script..."
+        sh "$nix_tmp/nix-installer.sh" install --no-confirm
+    ); then
+        log_error "Nix installation failed."
         return 1
     fi
 
-    log_info "Running official Nix multi-user install script..."
-    if sh "$nix_tmp/nix-installer.sh" install --no-confirm; then
-        for profile in \
-            "/etc/profile.d/nix.sh" \
-            "$HOME/.nix-profile/etc/profile.d/nix.sh" \
-            "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"; do
-            if [ -f "$profile" ]; then
-                log_info "Activating Nix environment from $profile..."
-                # shellcheck source=/dev/null
-                . "$profile"
-                break
-            fi
-        done
-        if command_exists nix; then
-            log_success "Nix installed and activated via official script!"
-            return 0
+    # The installer succeeded; bring Nix onto PATH for the rest of this process.
+    for profile in \
+        "/etc/profile.d/nix.sh" \
+        "$HOME/.nix-profile/etc/profile.d/nix.sh" \
+        "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"; do
+        if [ -f "$profile" ]; then
+            log_info "Activating Nix environment from $profile..."
+            # shellcheck source=/dev/null
+            . "$profile"
+            break
         fi
+    done
+    if command_exists nix; then
+        log_success "Nix installed and activated via official script!"
+        return 0
     fi
 
     log_error "All Nix installation methods failed. Install manually: https://nixos.org/download.html"
