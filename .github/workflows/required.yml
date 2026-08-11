@@ -149,6 +149,58 @@ jobs:
           [ "$rc" -eq 0 ] && echo "ok — Nix installer pin agrees across install.sh, install.ps1 and both libs"
           exit "$rc"
 
+      - name: Bun installer digests match their pinned tags
+        # Same contract as the Nix and hook pins. Bun's installers are run
+        # rather than reimplemented — they do CPU baseline detection we do not
+        # want to duplicate — so what we verify is the script, pinned to a tag.
+        #
+        # Note the two are checked independently: the shell installer is
+        # byte-identical to bun.sh/install, the PowerShell one is not, so they
+        # cannot be assumed to move together.
+        run: |
+          set -euo pipefail
+          rc=0
+
+          # Extract by variable name rather than by matching a URL or a bare
+          # 64-hex run. bun.ps1 carries two pins, so a "first hex string wins"
+          # pattern would silently check one of them twice.
+          verify() {  # label, url, want
+            if [ -z "$2" ] || [ -z "$3" ]; then
+              echo "::error::could not read the $1 pin — the extraction in this workflow no longer matches the file"
+              rc=1; return
+            fi
+            actual="$(curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$2" | sha256sum | cut -d' ' -f1)"
+            if [ "$actual" != "$3" ]; then
+              echo "::error::$1: $2 now hashes to $actual, but the pin says $3"
+              echo "::error::Review the change, then update scripts/lib/bun.sh and scripts/lib/bun.ps1 together."
+              rc=1
+            else
+              echo "ok — $1 matches its pin"
+            fi
+          }
+
+          verify "bun.sh install.sh" \
+            "$(sed -n 's/.*bun_url="\([^"]*\)".*/\1/p' scripts/lib/bun.sh)" \
+            "$(sed -n 's/.*bun_sha="\([^"]*\)".*/\1/p' scripts/lib/bun.sh)"
+
+          verify "bun.ps1 install.ps1" \
+            "$(sed -n "s/.*bunUrl = '\([^']*\)'.*/\1/p" scripts/lib/bun.ps1)" \
+            "$(sed -n "s/.*bunSha = '\([^']*\)'.*/\1/p" scripts/lib/bun.ps1)"
+
+          verify "bun.ps1 install.sh" \
+            "$(sed -n "s/.*shUrl = '\([^']*\)'.*/\1/p" scripts/lib/bun.ps1)" \
+            "$(sed -n "s/.*shSha = '\([^']*\)'.*/\1/p" scripts/lib/bun.ps1)"
+
+          # The shell installer is pinned in two files; they must not drift.
+          a="$(sed -n 's/.*bun_sha="\([^"]*\)".*/\1/p' scripts/lib/bun.sh)"
+          b="$(sed -n "s/.*shSha = '\([^']*\)'.*/\1/p" scripts/lib/bun.ps1)"
+          if [ "$a" != "$b" ]; then
+            echo "::error::bun.sh and bun.ps1 pin different digests for install.sh: $a vs $b"
+            rc=1
+          fi
+
+          exit "$rc"
+
       - name: gen-pins missing-PINS guard is reachable
         # `grep -c` exits 1 on zero matches, so without `|| true` the command
         # substitution's status kills the script under `set -e` one line before
