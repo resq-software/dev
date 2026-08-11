@@ -146,7 +146,26 @@ jobs:
         # already pinned. That is worth stopping for.
         run: |
           set -euo pipefail
-          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+
+          # Branch on the exit status, not on captured output. `gh api` writes
+          # its error body to *stdout* on a 404, so capturing stdout
+          # unconditionally sets `existing` to a JSON error object — non-empty,
+          # so the "already exists" branch fires and every first release fails
+          # claiming a collision with a tag that does not exist. That is exactly
+          # what happened on the first real dispatch.
+          existing=""
+          if ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>/dev/null)"; then
+            existing="$(printf '%s' "$ref_json" | jq -r '.object.sha // empty')"
+
+            # An annotated tag's ref points at a tag object rather than a
+            # commit, so comparing that id against GITHUB_SHA would always
+            # differ and read as a collision. Dereference to the commit it
+            # targets. Tags this workflow creates are lightweight, but a
+            # maintainer tagging by hand usually produces an annotated one.
+            if [ "$(printf '%s' "$ref_json" | jq -r '.object.type // empty')" = "tag" ] && [ -n "$existing" ]; then
+              existing="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$existing" --jq '.object.sha')"
+            fi
+          fi
 
           if [ -z "$existing" ]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
