@@ -55,6 +55,47 @@ jobs:
       - name: Installers stamped from VERSION
         run: sh bin/stamp.sh --check
 
+      - name: Hook digests match the pinned crates commit
+        # install-hooks.{sh,ps1} fetch six files that become executables git
+        # runs on every commit and push. They used to come from a mutable
+        # branch with no verification; they are now pinned and digest-checked.
+        #
+        # Pins rot silently: if the crates templates change, the installers keep
+        # refusing perfectly good hooks and every fresh onboard fails with a
+        # checksum mismatch. This turns that into a failing check here instead,
+        # and equally catches a mistyped digest that would never match anything.
+        run: |
+          set -euo pipefail
+          sh_commit="$(sed -n 's/^ *CRATES_COMMIT="\(.*\)"$/\1/p' scripts/install-hooks.sh)"
+          ps_commit="$(sed -n "s/^ *\$cratesCommit = '\(.*\)'$/\1/p" scripts/install-hooks.ps1)"
+
+          [ -n "$sh_commit" ] || { echo "::error::could not read CRATES_COMMIT from install-hooks.sh"; exit 1; }
+          if [ "$sh_commit" != "$ps_commit" ]; then
+            echo "::error::installers disagree on the pinned commit: sh=$sh_commit ps1=$ps_commit"
+            exit 1
+          fi
+
+          base="https://raw.githubusercontent.com/resq-software/crates/$sh_commit/crates/resq-cli/templates/git-hooks"
+          rc=0
+          for h in pre-commit commit-msg prepare-commit-msg pre-push post-checkout post-merge; do
+            if ! actual="$(curl -fsSL --proto '=https' --tlsv1.2 "$base/$h" | sha256sum | cut -d' ' -f1)"; then
+              echo "::error::could not fetch $h from the pinned commit"
+              rc=1; continue
+            fi
+            # Assert the real digest appears in both installers rather than
+            # parsing their formats — a shell case and a PowerShell hashtable
+            # would need two brittle parsers to say the same thing.
+            for f in scripts/install-hooks.sh scripts/install-hooks.ps1; do
+              if ! grep -q "$actual" "$f"; then
+                echo "::error::$f has no digest matching $h at $sh_commit (expected $actual)"
+                rc=1
+              fi
+            done
+          done
+
+          [ "$rc" -eq 0 ] && echo "ok — all six hook digests match $sh_commit in both installers"
+          exit "$rc"
+
       - name: gen-pins missing-PINS guard is reachable
         # `grep -c` exits 1 on zero matches, so without `|| true` the command
         # substitution's status kills the script under `set -e` one line before
