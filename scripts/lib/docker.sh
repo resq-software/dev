@@ -14,9 +14,18 @@ install_docker() {
                 sudo apt-get install -y \
                     apt-transport-https ca-certificates curl \
                     software-properties-common lsb-release
-                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-                sudo add-apt-repository \
-                    "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+                # A keyring file scoped with signed-by, not `apt-key add`.
+                # apt-key installs into the global trusted set, where the key
+                # can sign packages for *every* repository on the system — a
+                # Docker key vouching for anything apt fetches. It is deprecated
+                # for exactly that reason.
+                sudo install -m 0755 -d /usr/share/keyrings
+                curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+                    https://download.docker.com/linux/ubuntu/gpg \
+                    | sudo gpg --dearmor --yes -o /usr/share/keyrings/docker.gpg
+                sudo chmod a+r /usr/share/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+                    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
                 sudo apt-get update -y
                 sudo apt-get install -y docker-ce docker-ce-cli containerd.io
                 sudo usermod -aG docker "$USER"

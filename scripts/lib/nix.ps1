@@ -16,7 +16,10 @@ function Install-Nix {
     }
 
     Log-Info 'Running official Nix multi-user installer...'
-    bash -c 'curl -L https://nixos.org/nix/install | sh -s -- --daemon --yes'
+    # Mirrors scripts/lib/nix.sh. -f is the important one: without it curl pipes
+    # a 4xx/5xx error body into sh. --proto/--proto-redir keep the redirect
+    # chain on https.
+    bash -c "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 https://nixos.org/nix/install | sh -s -- --daemon --yes"
 
     foreach ($p in @(
         '/etc/profile.d/nix.sh',

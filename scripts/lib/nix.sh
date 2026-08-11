@@ -33,7 +33,13 @@ install_nix() {
     fi
 
     log_info "Running official Nix multi-user install script..."
-    if curl -L https://nixos.org/nix/install | sh -s -- --daemon --yes; then
+    # -f matters as much as the TLS flags: without it curl emits the response
+    # body on a 4xx/5xx, and that HTML gets piped straight into sh. --proto and
+    # --proto-redir keep the whole redirect chain on https, and -L means there
+    # is a chain. install.sh already pins these for its own Nix install; this
+    # path did not, so the two disagreed about how much to trust the network.
+    if curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        https://nixos.org/nix/install | sh -s -- --daemon --yes; then
         for profile in \
             "/etc/profile.d/nix.sh" \
             "$HOME/.nix-profile/etc/profile.d/nix.sh" \

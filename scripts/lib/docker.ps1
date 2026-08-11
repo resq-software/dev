@@ -33,7 +33,7 @@ function Install-Docker {
                 Log-Error 'bash required for Linux Docker install.'
                 return $false
             }
-            bash -c 'curl -fsSL https://get.docker.com | sh'
+            bash -c "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 https://get.docker.com | sh"
             if (Test-Command 'sudo') { sudo usermod -aG docker $env:USER }
         }
         default {
