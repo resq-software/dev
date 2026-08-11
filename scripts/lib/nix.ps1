@@ -15,11 +15,29 @@ function Install-Nix {
         return $false
     }
 
-    Log-Info 'Running official Nix multi-user installer...'
-    # Mirrors scripts/lib/nix.sh. -f is the important one: without it curl pipes
-    # a 4xx/5xx error body into sh. --proto/--proto-redir keep the redirect
-    # chain on https.
-    bash -c "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 https://nixos.org/nix/install | sh -s -- --daemon --yes"
+    # Mirrors scripts/lib/nix.sh: pinned version, digest-checked before it runs.
+    # Bump both files together; required.yml re-checks the digest.
+    $nixUrl = 'https://install.determinate.systems/nix/tag/v3.21.9'
+    $nixSha = 'ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6'
+    $stage  = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    try {
+        $installer = Join-Path $stage 'nix-installer.sh'
+        Log-Info 'Downloading pinned Nix installer...'
+        Invoke-WebRequest -Uri $nixUrl -OutFile $installer -UseBasicParsing -ErrorAction Stop
+        $got = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($got -ne $nixSha) {
+            Log-Error 'Nix installer checksum mismatch — refusing to run it.'
+            Log-Error "  expected $nixSha"
+            Log-Error "  got      $got"
+            return $false
+        }
+        Log-Info 'Running official Nix multi-user installer...'
+        bash -c "sh '$installer' install --no-confirm"
+    }
+    finally {
+        Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+    }
 
     foreach ($p in @(
         '/etc/profile.d/nix.sh',

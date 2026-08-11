@@ -32,14 +32,42 @@ install_nix() {
         log_warning "Native pacman install failed. Falling back to official installer..."
     fi
 
+    # Pinned, downloaded and digest-checked before execution — matching what
+    # install.sh does. This used to pipe nixos.org/nix/install straight into sh
+    # with no -f, so a 4xx body would have been executed as a script.
+    #
+    # Determinate's versioned URL rather than nixos.org's rolling one, because
+    # it is the only one of the two that can be pinned at all, and install.sh
+    # already installs Nix from it. Two different installers for the same tool
+    # in one repo was its own problem.
+    #
+    # Bump both lines together; required.yml re-checks the digest.
+    local nix_url="https://install.determinate.systems/nix/tag/v3.21.9"
+    local nix_sha="ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6"
+    local nix_tmp nix_got
+    nix_tmp="$(mktemp -d)" || { log_error "Could not create a temporary directory."; return 1; }
+    trap 'rm -rf "$nix_tmp"' RETURN
+
+    log_info "Downloading pinned Nix installer..."
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        "$nix_url" -o "$nix_tmp/nix-installer.sh"; then
+        log_error "Could not download the Nix installer."
+        return 1
+    fi
+    if command_exists sha256sum; then
+        nix_got="$(sha256sum "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
+    else
+        nix_got="$(shasum -a 256 "$nix_tmp/nix-installer.sh" | cut -d' ' -f1)"
+    fi
+    if [ "$nix_got" != "$nix_sha" ]; then
+        log_error "Nix installer checksum mismatch — refusing to run it."
+        log_error "  expected $nix_sha"
+        log_error "  got      $nix_got"
+        return 1
+    fi
+
     log_info "Running official Nix multi-user install script..."
-    # -f matters as much as the TLS flags: without it curl emits the response
-    # body on a 4xx/5xx, and that HTML gets piped straight into sh. --proto and
-    # --proto-redir keep the whole redirect chain on https, and -L means there
-    # is a chain. install.sh already pins these for its own Nix install; this
-    # path did not, so the two disagreed about how much to trust the network.
-    if curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        https://nixos.org/nix/install | sh -s -- --daemon --yes; then
+    if sh "$nix_tmp/nix-installer.sh" install --no-confirm; then
         for profile in \
             "/etc/profile.d/nix.sh" \
             "$HOME/.nix-profile/etc/profile.d/nix.sh" \

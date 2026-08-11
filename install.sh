@@ -62,7 +62,16 @@ else
   BOLD=''; GREEN=''; YELLOW=''; RED=''; CYAN=''; RESET=''
 fi
 
-NIX_INSTALL_URL="https://install.determinate.systems/nix"
+# Pinned to a version rather than the rolling endpoint.
+# https://install.determinate.systems/nix is a redirect to exactly this URL
+# today, so pinning costs nothing and means a change to what Determinate serves
+# cannot silently change what we execute. The versioned URL was verified to
+# return identical bytes across fetches.
+#
+# Bump both lines together. required.yml re-checks the digest against the live
+# URL, so a stale pin fails CI rather than every user's install.
+NIX_INSTALL_URL="https://install.determinate.systems/nix/tag/v3.21.9"
+NIX_INSTALLER_SHA256="ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6"
 ORG="resq-software"
 
 # Pinned, hash-verified distribution endpoint (see worker/src/index.js). It
@@ -364,7 +373,21 @@ install_nix() {
       return 0
     fi
     info "Installing Nix via Determinate Systems installer..."
-    curl --proto '=https' --tlsv1.2 -sSf -L "$NIX_INSTALL_URL" | sh -s -- install
+    # Download and verify before executing, rather than piping to sh. This is
+    # the same treatment install-hooks.sh gets; the Nix installer runs with
+    # sudo and touches /nix, so it warrants at least as much.
+    #
+    # It remains a third-party artifact — Determinate publishes no digest of
+    # their own — so this pins *what we execute*, not what they wrote. A
+    # compromise of that endpoint before the pin was taken would still land.
+    make_tmpdir
+    _nix_installer="$TMPDIR_PATH/nix-installer.sh"
+    if ! fetch_verified "$NIX_INSTALL_URL" "$_nix_installer" "$NIX_INSTALLER_SHA256"; then
+      warn "Could not obtain a verified Nix installer — skipping Nix setup."
+      warn "  Install it yourself: https://determinate.systems/nix"
+      return 0
+    fi
+    sh "$_nix_installer" install
     NIX_JUST_INSTALLED=1
 
     # Source nix in current shell (this script's process only; see note above).

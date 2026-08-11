@@ -96,6 +96,39 @@ jobs:
           [ "$rc" -eq 0 ] && echo "ok — all six hook digests match $sh_commit in both installers"
           exit "$rc"
 
+      - name: Nix installer digest matches the pinned URL
+        # Same reasoning as the hook digests. The Nix installer is pinned to a
+        # versioned Determinate URL and checked before execution; if that URL's
+        # content ever changes, every install fails on a checksum mismatch. A
+        # red check here is a better way to learn that than a user's report.
+        #
+        # This pins what we execute, not what Determinate wrote — they publish
+        # no digest of their own. It closes the "silently different tomorrow"
+        # gap, not the "already compromised when we pinned it" one.
+        run: |
+          set -euo pipefail
+          url="$(sed -n 's/^NIX_INSTALL_URL="\(.*\)"$/\1/p' install.sh)"
+          want="$(sed -n 's/^NIX_INSTALLER_SHA256="\(.*\)"$/\1/p' install.sh)"
+          [ -n "$url" ] && [ -n "$want" ] || { echo "::error::could not read the Nix pin from install.sh"; exit 1; }
+
+          actual="$(curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$url" | sha256sum | cut -d' ' -f1)"
+          if [ "$actual" != "$want" ]; then
+            echo "::error::$url now hashes to $actual, but install.sh pins $want"
+            echo "::error::Review the change, then update the pin in install.sh, scripts/lib/nix.sh and scripts/lib/nix.ps1."
+            exit 1
+          fi
+
+          # All three copies must agree, or one silently stops matching and only
+          # some entry points break.
+          rc=0
+          for f in scripts/lib/nix.sh scripts/lib/nix.ps1; do
+            grep -q "$want" "$f" || { echo "::error::$f does not carry the pinned digest $want"; rc=1; }
+            grep -q "$url"  "$f" || { echo "::error::$f does not carry the pinned URL $url"; rc=1; }
+          done
+
+          [ "$rc" -eq 0 ] && echo "ok — Nix installer pin agrees across install.sh and both libs"
+          exit "$rc"
+
       - name: gen-pins missing-PINS guard is reachable
         # `grep -c` exits 1 on zero matches, so without `|| true` the command
         # substitution's status kills the script under `set -e` one line before
