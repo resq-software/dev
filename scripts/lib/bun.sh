@@ -20,27 +20,41 @@ install_bun() {
             # Bump both lines together; required.yml re-checks the digest.
             local bun_url="https://raw.githubusercontent.com/oven-sh/bun/bun-v1.3.14/src/cli/install.sh"
             local bun_sha="bab8acfb046aac8c72407bdcce903957665d655d7acaa3e11c7c4616beae68dd"
-            local bun_tmp bun_got
-            bun_tmp="$(mktemp -d)" || { log_error "Could not create a temporary directory."; return 1; }
-            trap 'rm -rf "$bun_tmp"' RETURN
 
-            if ! curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-                "$bun_url" -o "$bun_tmp/install.sh"; then
-                log_error "Could not download the Bun installer."
+            # Subshell with an EXIT trap, not a RETURN trap in this function —
+            # same reasoning as scripts/lib/nix.sh. A RETURN trap set inside a
+            # function is not confined to it: under `set -T` it persists and
+            # fires on unrelated later returns, it silently replaces any RETURN
+            # trap the caller installed, and under `set -u` the out-of-scope
+            # temp variable makes it abort with "unbound variable". These are
+            # library functions meant to be sourced, so that is a realistic way
+            # for a caller to be broken by us.
+            if ! (
+                set -e
+                bun_tmp="$(mktemp -d)"
+                trap 'rm -rf "$bun_tmp"' EXIT
+
+                if ! curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+                    "$bun_url" -o "$bun_tmp/install.sh"; then
+                    log_error "Could not download the Bun installer."
+                    exit 1
+                fi
+                if command_exists sha256sum; then
+                    bun_got="$(sha256sum "$bun_tmp/install.sh" | cut -d' ' -f1)"
+                else
+                    bun_got="$(shasum -a 256 "$bun_tmp/install.sh" | cut -d' ' -f1)"
+                fi
+                if [ "$bun_got" != "$bun_sha" ]; then
+                    log_error "Bun installer checksum mismatch — refusing to run it."
+                    log_error "  expected $bun_sha"
+                    log_error "  got      $bun_got"
+                    exit 1
+                fi
+                bash "$bun_tmp/install.sh"
+            ); then
+                log_error "Bun installation failed."
                 return 1
             fi
-            if command_exists sha256sum; then
-                bun_got="$(sha256sum "$bun_tmp/install.sh" | cut -d' ' -f1)"
-            else
-                bun_got="$(shasum -a 256 "$bun_tmp/install.sh" | cut -d' ' -f1)"
-            fi
-            if [ "$bun_got" != "$bun_sha" ]; then
-                log_error "Bun installer checksum mismatch — refusing to run it."
-                log_error "  expected $bun_sha"
-                log_error "  got      $bun_got"
-                return 1
-            fi
-            bash "$bun_tmp/install.sh"
             export BUN_INSTALL="$HOME/.bun"
             export PATH="$BUN_INSTALL/bin:$PATH"
             ;;
