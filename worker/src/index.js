@@ -69,21 +69,21 @@
 // to the inline pins below — degrading to a known-good pin, never to unpinned.
 
 const PINS = {
-  latest: "0.3.0",
-  releases: {
-    "0.3.0": {
-      commit: "afbc33517c51d5e2555d99f25374b42d3176177f",
-      artifacts: {
-        "install.sh": "4ccc02b035d825b930a0612e07a9d4bca19d32ab891e711f6c3f445a29ebc826",
-        "install.ps1": "d7e7e43b99183346e2c9a6a3269856455a7e3ed19b4d63bab79eb2d12c87dace",
+  "latest": "0.4.0",
+  "releases": {
+    "0.4.0": {
+      "commit": "228b73de77d2e20a3d7a2e7137e508de9e602f16",
+      "artifacts": {
+        "install.sh": "639b4167471082c6e59084a57e4e535e6ceef09909888873fa5f0ac39efc13be",
+        "install.ps1": "188e0979c3eca059f18a6553f56d6ec195948d78b899babc142f19249a6a586c",
         "scripts/install-hooks.sh": "24bd874dd27ff55153be602a5ad7fb366f4283ae4423323f8fd2bc2af442c68a",
         "scripts/install-hooks.ps1": "4976c3920f5e2c5e6d347ed791d00119f46152c946a6f8186a98690deef9dd23",
         "scripts/install-resq.sh": "38a70c003b3b83f8cf5e78961fea1246b69247a800fc1788167e5b4ea44759bf",
         "scripts/setup.sh": "6792ee2e02bcfa982046a36ed68532f4af44be93fd1243fc77a253d303767ca1",
-        "scripts/setup.ps1": "899a4840661be11ab3104e1aca60f3bfb78f8a7139bf6a373803d6c1c0a8db55",
-      },
-    },
-  },
+        "scripts/setup.ps1": "899a4840661be11ab3104e1aca60f3bfb78f8a7139bf6a373803d6c1c0a8db55"
+      }
+    }
+  }
 };
 
 const REPO = "resq-software/dev";
