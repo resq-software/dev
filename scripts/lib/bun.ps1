@@ -12,7 +12,7 @@ function Install-Bun {
                 Log-Error 'bash required for Bun install.'
                 return $false
             }
-            bash -c 'curl -fsSL https://bun.sh/install | bash'
+            bash -c "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 https://bun.sh/install | bash"
             $env:BUN_INSTALL = "$HOME/.bun"
             $env:PATH        = "$env:BUN_INSTALL/bin:$env:PATH"
         }

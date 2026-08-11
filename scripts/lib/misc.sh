@@ -18,7 +18,12 @@ md5sum_wrapper() {
 
 get_latest_github_release() {
     local repo="$1"
-    curl -s "https://api.github.com/repos/${repo}/releases/latest" \
+    # -f as well as -s: without it an error body is piped into the parser, and a
+    # GitHub error message can be mistaken for a tag name. The proto flags match
+    # every other fetch in this tree — this one reads JSON rather than feeding a
+    # shell, but there is no reason for it to be the exception.
+    curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        "https://api.github.com/repos/${repo}/releases/latest" \
         | grep '"tag_name":' \
         | sed -E 's/.*"([^"]+)".*/\1/'
 }
