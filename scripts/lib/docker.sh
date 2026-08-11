@@ -19,12 +19,45 @@ install_docker() {
                 # can sign packages for *every* repository on the system — a
                 # Docker key vouching for anything apt fetches. It is deprecated
                 # for exactly that reason.
+                # Docker publishes separate suites for Debian and Ubuntu, and the
+                # codename has to come from the matching one. Hardcoding ubuntu
+                # with `lsb_release -cs` breaks on Debian: it yields e.g.
+                # "bookworm", which the ubuntu suite does not publish, so apt
+                # either errors or silently finds no candidate.
+                local dk_id dk_like dk_repo dk_codename
+                dk_id="$(. /etc/os-release && echo "${ID:-}")"
+                dk_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
+                case "$dk_id" in
+                    ubuntu) dk_repo=ubuntu
+                            dk_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")" ;;
+                    debian) dk_repo=debian
+                            dk_codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")" ;;
+                    *)
+                        # Derivatives (Mint, Pop!_OS, Kali) report their own ID;
+                        # ID_LIKE names the upstream whose suite they track, and
+                        # UBUNTU_CODENAME/DEBIAN_CODENAME carry the right suite.
+                        case "$dk_like" in
+                            *ubuntu*) dk_repo=ubuntu
+                                      dk_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-}")" ;;
+                            *debian*) dk_repo=debian
+                                      dk_codename="$(. /etc/os-release && echo "${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}")" ;;
+                            *) log_error "Unrecognised apt distribution '$dk_id'. Install Docker manually: https://docs.docker.com/engine/install/"
+                               return 1 ;;
+                        esac
+                        ;;
+                esac
+                if [ -z "$dk_codename" ]; then
+                    log_error "Could not determine the distribution codename for '$dk_id'."
+                    log_error "Install Docker manually: https://docs.docker.com/engine/install/"
+                    return 1
+                fi
+
                 sudo install -m 0755 -d /usr/share/keyrings
                 curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-                    https://download.docker.com/linux/ubuntu/gpg \
+                    "https://download.docker.com/linux/$dk_repo/gpg" \
                     | sudo gpg --dearmor --yes -o /usr/share/keyrings/docker.gpg
                 sudo chmod a+r /usr/share/keyrings/docker.gpg
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/$dk_repo $dk_codename stable" \
                     | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
                 sudo apt-get update -y
                 sudo apt-get install -y docker-ce docker-ce-cli containerd.io

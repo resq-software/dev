@@ -35,7 +35,11 @@ $ErrorActionPreference = 'Stop'
 # re-runs the stamper and fails if the committed value differs.
 $ScriptVersion  = '0.4.1'
 $Org            = 'resq-software'
-$NixInstallUrl  = 'https://install.determinate.systems/nix'
+# Pinned to a version rather than the rolling endpoint, and digest-checked
+# before it runs — mirrors install.sh. required.yml re-checks the digest against
+# the live URL, so a stale pin fails CI rather than every user's install.
+$NixInstallUrl  = 'https://install.determinate.systems/nix/tag/v3.21.9'
+$NixInstallerSha256 = 'ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6'
 
 # Pinned, hash-verified distribution endpoint (see worker/src/index.js). It
 # serves one specific commit and refuses to serve anything whose SHA-256 does
@@ -238,7 +242,37 @@ function Install-Nix {
         }
 
         Write-Info 'Installing Nix via Determinate Systems installer...'
-        bash -c "curl --proto '=https' --tlsv1.2 -sSf -L '$NixInstallUrl' | sh -s -- install"
+        # Download and verify before executing, rather than piping to sh —
+        # mirrors install.sh. The installer runs with sudo and touches /nix, so
+        # it warrants at least the treatment the hook installer gets.
+        #
+        # Still a third-party artifact: Determinate publishes no digest of their
+        # own, so this pins *what we execute*, not what they wrote.
+        $nixStage = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $nixStage -Force | Out-Null
+        try {
+            $nixInstaller = Join-Path $nixStage 'nix-installer.sh'
+            Invoke-WebRequest -Uri $NixInstallUrl -OutFile $nixInstaller -UseBasicParsing -ErrorAction Stop
+            $nixGot = (Get-FileHash -Path $nixInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($nixGot -ne $NixInstallerSha256) {
+                Write-Warn 'Nix installer checksum mismatch — skipping Nix setup.'
+                Write-Warn "  expected $NixInstallerSha256"
+                Write-Warn "  got      $nixGot"
+                return
+            }
+            bash -c "sh '$nixInstaller' install --no-confirm"
+            # A native command's failure does not throw in PowerShell, so
+            # without this the run continues and reports success. Verifying the
+            # download says the script is authentic, not that it worked.
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "The Nix installer exited $LASTEXITCODE — continuing without Nix."
+                Write-Warn '  Retry manually: https://determinate.systems/nix'
+                return
+            }
+        }
+        finally {
+            Remove-Item -Recurse -Force $nixStage -ErrorAction SilentlyContinue
+        }
         $script:NixJustInstalled = $true
 
         # Source nix in current shell
