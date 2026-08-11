@@ -23,8 +23,9 @@ shell snippet that exits non-zero, never installer bytes.
 
 Merging to `main` does not by itself change what you get here. What you receive
 is decided by the pinned digests in `worker/src/index.js`, so it changes only
-when a reviewed pin bump merges and deploys — which follows a tagged release
-rather than happening at the moment of tagging.
+when a reviewed pin bump merges and deploys. Cutting a release does not move
+this endpoint either: the release publishes the artifacts, and a separate
+reviewed pull request repoints the pins at them.
 
 You do not have to take that on faith. Verify against a single immutable
 release, so the installer and the digest list cannot describe different
@@ -145,6 +146,40 @@ list.
 | docs | MDX / Mintlify | `mintlify dev` |
 | dev | Shell / PowerShell | `shellcheck install.sh` · `node worker/test/index.test.mjs` |
 
+
+## 🏷 Releasing
+
+One authored value, one action:
+
+```bash
+echo 0.4.1 > VERSION
+sh bin/stamp.sh          # propagates VERSION + hook digests into both installers
+# open a PR, merge it — that is the release
+```
+
+**Do not tag by hand.** Merging a `VERSION` change to `main` is what releases:
+CI validates it, creates the tag itself, publishes the Release and
+`SHA256SUMS`, and opens a pin-bump PR. Merging *that* is what changes the bytes
+`https://get.resq.software` serves.
+
+Two gates, both ordinary code review:
+
+| merging | changes |
+|---|---|
+| a `VERSION` bump | what is published as a release |
+| the pin-bump PR | what users actually receive |
+
+Everything else is generated. `bin/stamp.sh --check` runs on every pull
+request and verifies by regeneration, so a stamped value cannot be forgotten —
+forgetting it is a diff. Values marked `GENERATED` should never be hand-edited.
+
+No Cloudflare credential is stored in GitHub. Deployment is Cloudflare Workers
+Builds pulling from this repository, and `worker-live` afterwards checks that
+the endpoint serves exactly what `main` declares — hashing the bytes on the
+wire, not trusting the Worker's own claim about them.
+
+`AGENTS.md` has the full reasoning, including why tagging is an output of the
+release rather than its trigger.
 
 ## Contributor guide
 
