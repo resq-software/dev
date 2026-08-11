@@ -55,6 +55,46 @@ jobs:
       - name: Installers stamped from VERSION
         run: sh bin/stamp.sh --check
 
+      - name: gen-pins missing-PINS guard is reachable
+        # `grep -c` exits 1 on zero matches, so without `|| true` the command
+        # substitution's status kills the script under `set -e` one line before
+        # the die that explains what went wrong — the guard becomes unreachable
+        # in exactly the case it exists for.
+        #
+        # Fixed once, then silently reverted by an unrelated PR that staged a
+        # stale copy of the file. Nothing caught it because nothing tested it.
+        # Asserting on the message rather than on a source line means a future
+        # rewrite still has to preserve the behaviour.
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/r"
+          cd "$tmp/r"
+          # gen-pins needs at least one v* tag before it reaches write_source.
+          git tag -f v0.0.1 HEAD >/dev/null 2>&1
+          printf 'not a worker\n' > worker/src/index.js
+
+          # Assert the exit status too, not only the message. The guard exists
+          # to *stop* the run; a script that printed this text and exited 0
+          # would satisfy a message-only check while being broken in precisely
+          # the way that matters. `if out="$(...)"` keeps set -e out of the way.
+          if out="$(sh bin/gen-pins.sh --write 2>&1)"; then
+            echo "::error::gen-pins.sh exited 0 on a file with no PINS block; it must fail"
+            echo "::error::output was: ${out:-<no output>}"
+            exit 1
+          fi
+
+          # Match the whole diagnostic rather than a fragment, so a message that
+          # drifts into meaning something else cannot keep passing.
+          case "$out" in
+            *"expected exactly one 'const PINS = {' in worker/src/index.js, found 0"*)
+              echo "ok — guard failed with: $out" ;;
+            *)
+              echo "::error::gen-pins.sh failed, but not with the missing-PINS diagnostic"
+              echo "::error::got: ${out:-<no output>}"
+              exit 1 ;;
+          esac
+
   powershell:
     name: PowerShell parse + analyze (*.ps1)
     runs-on: ubuntu-latest
