@@ -96,6 +96,38 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "releasing v$version from $GITHUB_SHA"
 
+      - name: Restrict where a release may be cut from
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        # workflow_dispatch lets a caller choose any ref. Without this, anyone
+        # with write access could push a branch carrying a bumped VERSION and an
+        # altered install.sh, dispatch a release, and obtain a tag plus a
+        # published Release with SHA256SUMS — from code that was never reviewed.
+        # That is exactly the gate this workflow exists to enforce, so the
+        # dispatch path has to be pinned to refs a caller cannot forge.
+        #
+        # The push trigger only ever fires on main, so this guards dispatch.
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main)
+              echo "releasing from main"
+              ;;
+            "refs/tags/$TAG")
+              # Recovery only: re-running a release whose later stages failed,
+              # from the tag it already created. The tag step below then finds
+              # that tag pointing at this very commit and continues, so this
+              # path cannot publish anything new. Tag creation is itself
+              # restricted by the release-tags ruleset, so the ref is already
+              # privileged.
+              echo "re-running the release for $TAG from its own tag"
+              ;;
+            *)
+              echo "::error::releases may only be cut from refs/heads/main or refs/tags/$TAG, not $GITHUB_REF"
+              exit 1
+              ;;
+          esac
+
       - name: Assert the installers are stamped
         # Verification by regeneration: re-run the stamper and fail if anything
         # would change. Comparing individual strings would silently miss any new
