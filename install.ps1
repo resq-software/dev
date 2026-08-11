@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 
 # GENERATED — stamped from VERSION by bin/stamp.sh. Do not edit by hand: CI
 # re-runs the stamper and fails if the committed value differs.
-$ScriptVersion  = '0.4.1'
+$ScriptVersion  = '0.4.2'
 $Org            = 'resq-software'
 # Pinned to a version rather than the rolling endpoint, and digest-checked
 # before it runs — mirrors install.sh. required.yml re-checks the digest against
