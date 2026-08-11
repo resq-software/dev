@@ -69,7 +69,7 @@
 // to the inline pins below — degrading to a known-good pin, never to unpinned.
 
 const PINS = {
-  "latest": "0.4.1",
+  "latest": "0.4.2",
   "releases": {
     "0.4.0": {
       "commit": "228b73de77d2e20a3d7a2e7137e508de9e602f16",
@@ -88,6 +88,18 @@ const PINS = {
       "artifacts": {
         "install.sh": "2a25701001325530d1575b18f858b1e1841c0d89bba737e6a5ff3ff559710dea",
         "install.ps1": "98c667397929ea16d11b29b15c5db0d60604a9bb805f82423aee907c0308c73e",
+        "scripts/install-hooks.sh": "3b3e67197ffe8df9b4b4df1088c8e0fa5a737d69f18a5d97bc36bd697762c3e2",
+        "scripts/install-hooks.ps1": "772ee7538f585effdc809a9a760314b4261b5c0955897e844db6d020c0fbed5e",
+        "scripts/install-resq.sh": "38a70c003b3b83f8cf5e78961fea1246b69247a800fc1788167e5b4ea44759bf",
+        "scripts/setup.sh": "6792ee2e02bcfa982046a36ed68532f4af44be93fd1243fc77a253d303767ca1",
+        "scripts/setup.ps1": "899a4840661be11ab3104e1aca60f3bfb78f8a7139bf6a373803d6c1c0a8db55"
+      }
+    },
+    "0.4.2": {
+      "commit": "a66d8743be13db8c84d417451825133ea0fa2275",
+      "artifacts": {
+        "install.sh": "f121913c2b5bcf29fb3dc6035cd8a65c4b72272fa33f41dc30b9f1c63bc3f17c",
+        "install.ps1": "84bc0151326545092da50bc650d64ef5e0fbce4052106c363643195c52eab4a7",
         "scripts/install-hooks.sh": "3b3e67197ffe8df9b4b4df1088c8e0fa5a737d69f18a5d97bc36bd697762c3e2",
         "scripts/install-hooks.ps1": "772ee7538f585effdc809a9a760314b4261b5c0955897e844db6d020c0fbed5e",
         "scripts/install-resq.sh": "38a70c003b3b83f8cf5e78961fea1246b69247a800fc1788167e5b4ea44759bf",
