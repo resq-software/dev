@@ -214,9 +214,13 @@ jobs:
             echo "Verify what you were served, from one immutable release:"
             echo
             echo '```sh'
-            echo "REL=https://get.resq.software/v$VERSION"
-            echo 'curl -fsSL "$REL/SHA256SUMS"'
-            echo 'curl -fsSL "$REL/install.sh" | sha256sum'
+            # Full URLs rather than a REL= variable. A literal $REL inside
+            # single quotes trips shellcheck SC2016, which actionlint fails the
+            # build on; escaping it would read worse than just expanding
+            # $VERSION here, and the reader gets lines they can paste without
+            # setting a variable first.
+            echo "curl -fsSL https://get.resq.software/v$VERSION/SHA256SUMS"
+            echo "curl -fsSL https://get.resq.software/v$VERSION/install.sh | sha256sum"
             echo '```'
             echo
             echo "The endpoint keeps serving the previous release until the pin-bump PR merges and deploys."
