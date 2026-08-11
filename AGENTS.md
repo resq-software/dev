@@ -98,13 +98,24 @@ Tagging is deliberately an *output* rather than a trigger. Two things make the
 obvious alternative — a workflow that pushes a tag — not work, and both are
 easy to rediscover painfully:
 
-- the `release-tags` ruleset rejects tag creation by anyone outside
-  `@resq-software/installer-maintainers`, bots included, unless the GitHub
-  Actions app is a bypass actor;
 - a tag pushed with `GITHUB_TOKEN` starts no workflow run at all, because
-  GitHub suppresses run-triggering events originating from that token.
+  GitHub suppresses run-triggering events originating from that token;
+- and there is no way to exempt Actions from a tag ruleset. GitHub Actions is a
+  first-party integration, not an installable app, so it cannot be named as a
+  bypass actor — the API rejects it outright.
 
-Nothing here waits on a tag, so the second rule cannot bite.
+Nothing here waits on a tag, so the first rule cannot bite.
+
+Because of the second, `release-tags` enforces `update` and `deletion` but
+**not** `creation`. Those two are the ones that matter: pins resolve a tag to a
+commit, so a moved or deleted tag would silently repoint a published version.
+An extra tag publishes nothing by itself, since the trigger is a `VERSION`
+change.
+
+The consequence is that a `v*` ref is no longer inherently privileged, so
+`release.yml` checks that the commit is an ancestor of `main` rather than
+trusting the ref it was reached by. Review is what makes a commit releasable;
+the ref is incidental.
 
 Order still matters: **stamp, then merge.** The commit being released has to
 declare its own version, or artifacts published at `v0.5.0` would claim to be

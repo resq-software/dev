@@ -16,13 +16,23 @@
 # Automating a tag *push* does not work, for two reasons worth recording so
 # nobody re-derives them the hard way:
 #
-#   1. The `release-tags` ruleset blocks creation of refs/tags/v* for everyone
-#      outside @resq-software/installer-maintainers, so a bot push is rejected
-#      unless the GitHub Actions app is a bypass actor.
-#   2. Even when allowed, a tag pushed with GITHUB_TOKEN does not start a
-#      workflow run. GitHub suppresses run-triggering events from that token —
-#      the same rule that would have left every pin-bump PR without its
-#      required check.
+#   1. A tag pushed with GITHUB_TOKEN does not start a workflow run. GitHub
+#      suppresses run-triggering events from that token — the same rule that
+#      would have left every pin-bump PR without its required check.
+#   2. The `release-tags` ruleset originally restricted tag *creation* to
+#      @resq-software/installer-maintainers, which blocked this workflow
+#      outright. There is no way to exempt it: GitHub Actions is a first-party
+#      integration rather than an installable app, so it cannot be named as a
+#      bypass actor — the API rejects it with "Actor GitHub Actions integration
+#      must be part of the ruleset source or owner organization".
+#
+#      So `creation` was dropped and `update` + `deletion` kept. Those are the
+#      rules that matter: pins resolve a tag to a commit, so a moved or deleted
+#      tag would silently repoint a published version. A merely *extra* tag
+#      publishes nothing, because the trigger is a VERSION change, not a tag.
+#
+#      The cost is that a v* ref is no longer inherently privileged, so the
+#      guard below checks the commit is on main rather than trusting the ref.
 #
 # So the trigger is inverted instead: this runs because VERSION changed, and
 # creates the tag as an *output* of its own work. Nothing needs to be triggered
@@ -115,11 +125,7 @@ jobs:
               ;;
             "refs/tags/$TAG")
               # Recovery only: re-running a release whose later stages failed,
-              # from the tag it already created. The tag step below then finds
-              # that tag pointing at this very commit and continues, so this
-              # path cannot publish anything new. Tag creation is itself
-              # restricted by the release-tags ruleset, so the ref is already
-              # privileged.
+              # from the tag it already created.
               echo "re-running the release for $TAG from its own tag"
               ;;
             *)
@@ -127,6 +133,29 @@ jobs:
               exit 1
               ;;
           esac
+
+          # The ref allowlist above is necessary but no longer sufficient.
+          #
+          # It used to lean on the release-tags ruleset restricting tag creation
+          # to the maintainers team, which made a v* ref inherently privileged.
+          # That rule had to be dropped: GitHub Actions is a first-party
+          # integration, not an installable app, so it cannot be named as a
+          # bypass actor at all and the workflow could never create a tag while
+          # `creation` was enforced.
+          #
+          # With creation unrestricted, anyone with write access could tag an
+          # unreviewed commit as v9.9.9 — stamping it so VERSION matches — and
+          # dispatch from that tag, publishing a Release from code nobody
+          # reviewed. That is the branch hole, reopened through tags.
+          #
+          # So require the commit itself to be on main. Review is what makes a
+          # commit releasable; the ref used to reach it is incidental.
+          git fetch --depth=0 origin main --quiet 2>/dev/null || git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not an ancestor of origin/main; only commits merged to main may be released"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main"
 
       - name: Assert the installers are stamped
         # Verification by regeneration: re-run the stamper and fail if anything
@@ -168,8 +197,18 @@ jobs:
           fi
 
           if [ -z "$existing" ]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+            # Capture rather than discard. `>/dev/null` here previously threw
+            # away GitHub's explanation — "Cannot create ref due to creations
+            # being restricted" — leaving only "Reference update failed (HTTP
+            # 422)", which says nothing about why. Diagnosing that took a
+            # round-trip through the rule-suites API to recover a message the
+            # call had already been given.
+            if ! created="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                  -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" 2>&1)"; then
+              echo "::error::could not create $TAG at $GITHUB_SHA"
+              echo "::error::$created"
+              exit 1
+            fi
             echo "created $TAG at $GITHUB_SHA"
           elif [ "$existing" = "$GITHUB_SHA" ]; then
             echo "$TAG already exists at this commit; continuing"
