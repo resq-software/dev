@@ -18,10 +18,21 @@ permissions:
 # with no AI-credits pricing, so every request failed with
 # `unknown_model_ai_credits` and the agent job died on every PR.
 #
-# Do not "fix" this by switching to a flash alias: `gemini-flash` globs to
-# `gemini-*flash*`, which matches that same TTS preview. `gemini-3*pro*` cannot.
+# The model ID must be one the Generative Language API actually serves — the
+# CLI calls it directly at v1beta with GEMINI_API_KEY, so proxy alias names do
+# not apply. `gemini-3-pro` looks plausible and does not exist; it fails with
+# ModelNotFoundError.
+#
+# Enumerated via ListModels against this repo's key. gemini-2.5-pro is the only
+# generally-available pro model: every 3.x pro is `-preview` and can be
+# withdrawn without notice. `gemini-pro-latest` and `gemini-flash-latest` are
+# floating aliases, rejected for the same reason every other dependency here is
+# pinned — a silent upstream swap is exactly what this repo verifies against.
+#
+# To re-check what is callable, list models with the x-goog-api-key header
+# against https://generativelanguage.googleapis.com/v1beta/models.
 engine: gemini
-model: gemini-3-pro
+model: gemini-2.5-pro
 
 # Network access
 network: defaults
