@@ -12,7 +12,16 @@ permissions:
   pull-requests: read
 
 # AI engine - Gemini (free Google AI Studio tier; avoids Copilot utility-model rate limits)
+#
+# The model is pinned. Unpinned, the CLI asks the proxy for `auto-gemini-3`,
+# which resolved to `gemini-3.1-flash-tts-preview` — a text-to-speech preview
+# with no AI-credits pricing, so every request failed with
+# `unknown_model_ai_credits` and the agent job died on every PR.
+#
+# Do not "fix" this by switching to a flash alias: `gemini-flash` globs to
+# `gemini-*flash*`, which matches that same TTS preview. `gemini-3*pro*` cannot.
 engine: gemini
+model: gemini-3-pro
 
 # Network access
 network: defaults
