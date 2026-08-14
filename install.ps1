@@ -48,7 +48,7 @@ $DistBase       = 'https://get.resq.software'
 
 # GENERATED — SHA-256 of scripts/install-hooks.ps1 at this version, checked
 # before that file is ever executed. Stamped by bin/stamp.sh.
-$HooksSha256    = '772ee7538f585effdc809a9a760314b4261b5c0955897e844db6d020c0fbed5e'
+$HooksSha256    = 'f061d4155ddc82b3ea9454595e0d83708676569f1cda18b54b15ff5a38602f3e'
 
 # Canonical repo table — one source of truth for the menu, validation and the
 # post-install summary. Those used to be three separate lists that could
