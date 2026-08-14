@@ -67,14 +67,14 @@ if ($resqBin) {
     # Pinned commit in resq-software/crates. Keep in step with the digests below
     # and with scripts/install-hooks.sh; required.yml re-checks all three
     # against the live endpoint, so drift fails CI rather than a user's install.
-    $cratesCommit = 'e8e723d941673e32c0c5e3cc782c07262ad9dc2e'
+    $cratesCommit = 'cdc3aa0203ee5785ec1b0ceaafc8937688e6c5c3'
     $hookDigests = @{
         'pre-commit'         = '540c19f96fe258df6d90a8357b27513657b380567650ce3aaed83efa216a64ee'
-        'commit-msg'         = '74eb3a46ed60a34bafc044e9800811afd684756be7cb32384a551f0c5cf73019'
-        'prepare-commit-msg' = '8c5092d5206647be93dc25deb02b4068531b48b7bc916ddadaca49b60f94d620'
-        'pre-push'           = '9627f0ad867d9e031f0bb756aaa8480533093bc7917798c6c617d85cc6ddfed8'
-        'post-checkout'      = '05d9be133a6edfd177a04a3a32c822896160a73c2a7d363d3136943f20ddd2cb'
-        'post-merge'         = '292fd2eeaae8243fd3c73512f41e7b88f7c83d67c78601dd66c3ce8e4a2dad83'
+        'commit-msg'         = 'e7fa95d5d54f212ef145ae9d53cae08b24b0f9dbd5501fde1dae0aa4ddfeb2a6'
+        'prepare-commit-msg' = '4fa2e7abf284adc93da750b9c4387de781dd552874290c81885c5dc19debe99b'
+        'pre-push'           = '85677f87b30220a443e00191e8267998f62c83642127311c72efe841aab72c79'
+        'post-checkout'      = '2a894cf301bd487494d57f39159de07b79f608beeece349de5a4bdc0b5a11480'
+        'post-merge'         = 'b05e2ecacb5c342b3fc3525987ad73dc700079bfe7fd5bf7eac67461ea77cfbb'
     }
 
     # -Ref still works, but pinned digests cannot describe an arbitrary ref, so
