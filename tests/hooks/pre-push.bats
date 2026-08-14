@@ -25,7 +25,9 @@ push_line() { printf '%s %s %s %s\n' "$1" "$2" "$3" "$4"; }
 
 @test "rejects bad branch name" {
     git -C "$REPO" checkout -q -b nope/bad-prefix
-    run bash -c "cd '$REPO' && bash .git-hooks/pre-push origin git@example </dev/null"
+    LOCAL=$(git -C "$REPO" rev-parse HEAD)
+    LINE="$(push_line refs/heads/nope/bad-prefix "$LOCAL" refs/heads/nope/bad-prefix "0000000000000000000000000000000000000000")"
+    run bash -c "cd '$REPO' && printf '%s\n' '$LINE' | bash .git-hooks/pre-push origin git@example"
     [ "$status" -ne 0 ]
     [[ "$output" == *"does not follow naming convention"* ]]
 }
