@@ -194,23 +194,56 @@ const ALIASES: Record<string, string> = {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+// One release, fully checked. `commit` must be 40 hex characters specifically
+// because anything else could be a branch or tag name — and those move. A pin
+// set whose commit is "main" is not a pin at all.
+//
+// Artifact digests are checked too. A digest that is not 64 hex characters can
+// never equal a real SHA-256, so it would fail closed at verifiedFetch anyway;
+// rejecting it here turns a confusing 502 into a clean fallback to the
+// known-good inline pins.
+function isRelease(value: unknown): value is Release {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const { commit, artifacts } = value as { commit?: unknown; artifacts?: unknown };
+  if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) return false;
+  if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts)) return false;
+  return Object.values(artifacts).every(
+    (digest) => typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest),
+  );
+}
+
 function pins(env: Env | undefined): PinConfig {
   if (!env || typeof env.RESQ_PINS !== "string") return DEFAULT_PINS;
   try {
-    const parsed = JSON.parse(env.RESQ_PINS) as Partial<PinConfig>;
-    // Validate the shape before trusting it. A half-formed override that
-    // slipped through a bad deploy must not disable verification.
-    //
-    // Typed as Partial and probed field by field on purpose: JSON.parse returns
-    // `any`, and a bare `as PinConfig` would have the compiler vouch for a
-    // shape nothing actually checked. The runtime guards are the real control
-    // here, exactly as before.
-    const latest = parsed?.latest;
+    // JSON.parse returns `any`, so this is typed `unknown` and narrowed by
+    // checks rather than by assertion. A bare `as PinConfig` would have the
+    // compiler vouch for a shape nothing had actually verified.
+    const parsed = JSON.parse(env.RESQ_PINS) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return DEFAULT_PINS;
+    const { latest, releases } = parsed as { latest?: unknown; releases?: unknown };
+
     if (typeof latest !== "string") return DEFAULT_PINS;
-    const rel = parsed?.releases?.[latest];
-    if (!rel || !/^[0-9a-f]{40}$/.test(rel.commit ?? "")) return DEFAULT_PINS;
-    if (!rel.artifacts || typeof rel.artifacts !== "object") return DEFAULT_PINS;
-    return parsed as PinConfig;
+    if (!releases || typeof releases !== "object" || Array.isArray(releases)) return DEFAULT_PINS;
+    // hasOwnProperty, not a bare index: `{"latest":"__proto__"}` would
+    // otherwise reach Object.prototype and satisfy a truthiness test.
+    if (!Object.prototype.hasOwnProperty.call(releases, latest)) return DEFAULT_PINS;
+
+    // EVERY release, not just releases[latest]. The previous version checked
+    // only the latest one, so a request for /0.4.0/install.sh could use an
+    // unvalidated commit from the same override — a half-formed override was
+    // accepted, contradicting the "malformed input degrades to known-good pins"
+    // rule stated above PINS. Found in review of this port; the JavaScript it
+    // replaced had the identical gap.
+    //
+    // Content stayed verified either way: verifiedFetch still compares bytes
+    // against that release's digest, so a mutable ref could not have smuggled
+    // arbitrary code through. This closes the hole one layer earlier, where the
+    // stated contract says it should close.
+    if (!Object.values(releases).every(isRelease)) return DEFAULT_PINS;
+
+    // Rebuilt from the validated fields rather than returning `parsed`, so any
+    // extra keys in the override are dropped instead of carried along.
+    return { latest, releases } as PinConfig;
   } catch {
     return DEFAULT_PINS;
   }

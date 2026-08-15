@@ -64,6 +64,7 @@ $Repos = @(
     [pscustomobject]@{ Name = 'crates'    ; Desc = 'Rust workspace (CLI + DSA)'     ; Includes = @('Rust toolchain, clippy, cargo-deny', 'Workspace: 9+ crates including CLI tools and resq-dsa') }
     [pscustomobject]@{ Name = 'dev'       ; Desc = 'Developer setup + installers'   ; Includes = @('POSIX sh + PowerShell installers, Cloudflare Worker', 'shellcheck install.sh, node worker/test/index.test.mjs') }
     [pscustomobject]@{ Name = 'docs'      ; Desc = 'Documentation site'             ; Includes = @('Mintlify docs site', 'npx mint dev for local preview') }
+    [pscustomobject]@{ Name = 'dotnet'    ; Desc = 'Clean architecture building blocks (.NET)'; Includes = @('.NET 9 SDK, pinned by global.json', 'Packages: ResQ.BuildingBlocks Domain, Application, Adapters, Testing', 'dotnet build -c Release, dotnet test -c Release') }
     [pscustomobject]@{ Name = 'dotnet-sdk'; Desc = '.NET client libraries'          ; Includes = @('.NET 9 SDK, Protobuf toolchain', 'dotnet build -c Release, dotnet test -c Release') }
     [pscustomobject]@{ Name = 'npm'       ; Desc = 'TypeScript packages (UI + DSA)' ; Includes = @('Bun, TypeScript, React 19, Storybook, Chromatic', 'Packages: @resq-sw/ui (55+ components), @resq-sw/dsa', 'Biome linter') }
     [pscustomobject]@{ Name = 'programs'  ; Desc = 'Solana/Anchor on-chain programs'; Includes = @('Solana CLI, Anchor framework, Rust toolchain', 'make anchor-build, make anchor-test') }

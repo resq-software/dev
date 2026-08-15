@@ -137,6 +137,60 @@ console.log("\n== fail closed ==");
   const r2 = await call("/install.sh", {}, { RESQ_PINS: '{"latest":"9.9.9","releases":{}}' });
   check("shape-invalid RESQ_PINS falls back", r2.status === 200);
 }
+{
+  // Every release in an override is validated, not only releases[latest].
+  //
+  // The regression this guards: validating just the latest release let a
+  // second, unchecked release ride along in the same override, so a request
+  // for that version could resolve a commit never checked to be a 40-hex SHA
+  // — i.e. possibly a branch or tag, which move. Serving stayed digest-
+  // verified regardless, but "malformed input degrades to known-good pins" is
+  // the stated contract and it was not being kept.
+  //
+  // Asserted through observable behaviour rather than by reaching into pins():
+  // if the override were accepted, /9.9.9/install.sh would resolve; when it is
+  // rejected the Worker falls back to inline pins, which have no 9.9.9.
+  const mutableRef = JSON.stringify({
+    latest: LATEST,
+    releases: {
+      [LATEST]: { commit: LATEST_COMMIT, artifacts: { "install.sh": "0".repeat(64) } },
+      "9.9.9": { commit: "main", artifacts: { "install.sh": "0".repeat(64) } },
+    },
+  });
+  const r3 = await call("/9.9.9/install.sh", {}, { RESQ_PINS: mutableRef });
+  check("override with a non-SHA commit is rejected wholesale", r3.status === 404, `got ${r3.status}`);
+
+  const badDigest = JSON.stringify({
+    latest: LATEST,
+    releases: {
+      [LATEST]: { commit: LATEST_COMMIT, artifacts: { "install.sh": "not-a-digest" } },
+    },
+  });
+  const r4 = await call("/install.sh", {}, { RESQ_PINS: badDigest });
+  check("override with a malformed digest falls back", r4.status === 200, `got ${r4.status}`);
+
+  // `latest` naming a prototype key must not resolve through Object.prototype.
+  const proto = JSON.stringify({ latest: "__proto__", releases: {} });
+  const r5 = await call("/install.sh", {}, { RESQ_PINS: proto });
+  check("__proto__ as latest falls back", r5.status === 200, `got ${r5.status}`);
+
+  // A fully valid override is still honoured. Without this the tests would
+  // pass just as well if pins() rejected everything, which would quietly
+  // disable the override mechanism instead of hardening it.
+  const artifacts = Object.fromEntries(
+    Object.values(bootstrap.artifacts)
+      .filter((a) => a.sha256)
+      .map((a) => [a.path, a.sha256]),
+  );
+  const valid = JSON.stringify({
+    latest: LATEST,
+    releases: { [LATEST]: { commit: LATEST_COMMIT, artifacts } },
+  });
+  const r6 = await call("/install.sh", {}, { RESQ_PINS: valid });
+  const b6 = await r6.text();
+  check("valid override is still accepted", r6.status === 200, `got ${r6.status}`);
+  check("valid override serves the pinned bytes", b6.includes("SCRIPT_VERSION"));
+}
 
 console.log("\n== rejected requests ==");
 {

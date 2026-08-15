@@ -137,6 +137,7 @@ list.
 | Repo | Language | Setup |
 |------|----------|-------|
 | programs | Rust / Anchor | `anchor build` |
+| dotnet | C# / .NET 9 | `dotnet restore` |
 | dotnet-sdk | C# / .NET 9 | `dotnet restore` |
 | pypi | Python | `uv sync` |
 | crates | Rust | `cargo build` |

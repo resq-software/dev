@@ -104,6 +104,7 @@ REPOS="$(cat <<'EOF'
 crates|Rust workspace (CLI + DSA)|Rust toolchain, clippy, cargo-deny;Workspace: 9+ crates including CLI tools and resq-dsa
 dev|Developer setup + installers|POSIX sh + PowerShell installers, Cloudflare Worker;shellcheck install.sh, node worker/test/index.test.mjs
 docs|Documentation site|Mintlify docs site;npx mint dev for local preview
+dotnet|Clean architecture building blocks (.NET)|.NET 9 SDK, pinned by global.json;Packages: ResQ.BuildingBlocks Domain, Application, Adapters, Testing;dotnet build -c Release, dotnet test -c Release
 dotnet-sdk|.NET client libraries|.NET 9 SDK, Protobuf toolchain;dotnet build -c Release, dotnet test -c Release
 npm|TypeScript packages (UI + DSA)|Bun, TypeScript, React 19, Storybook, Chromatic;Packages: @resq-sw/ui (55+ components), @resq-sw/dsa;Biome linter
 programs|Solana/Anchor on-chain programs|Solana CLI, Anchor framework, Rust toolchain;make anchor-build, make anchor-test
