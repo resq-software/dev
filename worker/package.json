@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint src test",
     "types": "wrangler types",
     "test": "node test/index.test.mjs",
     "build": "wrangler deploy --dry-run --outdir dist",
@@ -23,9 +24,18 @@
     "",
     "Deploys are performed by Cloudflare Workers Builds from main using its",
     "own wrangler; these pins keep local builds and CI typechecking against",
-    "known versions rather than whatever npm resolves that day."
+    "known versions rather than whatever npm resolves that day.",
+    "",
+    "Biome is pinned to 2.5.2 to match resq-software/npm, the org's TypeScript",
+    "repo, so this repo reports the same findings rather than a nearby dialect.",
+    "It runs on Biome's own defaults with no biome.json, which is deliberate:",
+    "the org config's formatter strips the quotes from the generated PINS keys",
+    "that bin/gen-pins.sh writes back on every --write, and the two would then",
+    "disagree permanently. Defaults lint clean, so no config is needed to earn",
+    "the benefit."
   ],
   "devDependencies": {
+    "@biomejs/biome": "2.5.2",
     "@cloudflare/workers-types": "5.20260815.1",
     "typescript": "7.0.2",
     "wrangler": "4.123.0"

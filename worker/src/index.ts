@@ -224,9 +224,9 @@ function pins(env: Env | undefined): PinConfig {
 
     if (typeof latest !== "string") return DEFAULT_PINS;
     if (!releases || typeof releases !== "object" || Array.isArray(releases)) return DEFAULT_PINS;
-    // hasOwnProperty, not a bare index: `{"latest":"__proto__"}` would
+    // An own-property check, not a bare index: `{"latest":"__proto__"}` would
     // otherwise reach Object.prototype and satisfy a truthiness test.
-    if (!Object.prototype.hasOwnProperty.call(releases, latest)) return DEFAULT_PINS;
+    if (!Object.hasOwn(releases, latest)) return DEFAULT_PINS;
 
     // EVERY release, not just releases[latest]. The previous version checked
     // only the latest one, so a request for /0.4.0/install.sh could use an
@@ -365,7 +365,7 @@ function route(pathname: string): RouteTarget | null {
   if (name === "SHA256SUMS" || name === "manifest.json") return { version, name };
 
   const canonical = ALIASES[name] ?? name;
-  if (!Object.prototype.hasOwnProperty.call(ARTIFACTS, canonical)) return null;
+  if (!Object.hasOwn(ARTIFACTS, canonical)) return null;
   return { version, name: canonical };
 }
 
@@ -483,35 +483,35 @@ async function verifiedFetch(
 // ── Generated documents ─────────────────────────────────────────────────────
 
 function sha256sums(release: Release): string {
-  return (
-    Object.entries(release.artifacts)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([path, digest]) => `${digest}  ${path}`)
-      .join("\n") + "\n"
-  );
+  const lines = Object.entries(release.artifacts)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([path, digest]) => `${digest}  ${path}`)
+    .join("\n");
+  // Trailing newline matters: `sha256sum -c` expects every record to end with
+  // one, and a file without it fails to parse the final line on some coreutils.
+  return `${lines}\n`;
 }
 
 function manifest(config: PinConfig, version: string, release: Release): string {
-  return (
-    JSON.stringify(
-      {
-        repository: `github:${REPO}`,
-        version,
-        latest: config.latest,
-        commit: release.commit,
-        source: `https://github.com/${REPO}/tree/${release.commit}`,
-        artifacts: Object.fromEntries(
-          Object.entries(ARTIFACTS).map(([name, meta]) => [
-            name,
-            { path: meta.path, sha256: release.artifacts[meta.path] ?? null },
-          ]),
-        ),
-        versions: Object.keys(config.releases).sort(),
-      },
-      null,
-      2,
-    ) + "\n"
+  const doc = JSON.stringify(
+    {
+      repository: `github:${REPO}`,
+      version,
+      latest: config.latest,
+      commit: release.commit,
+      source: `https://github.com/${REPO}/tree/${release.commit}`,
+      artifacts: Object.fromEntries(
+        Object.entries(ARTIFACTS).map(([name, meta]) => [
+          name,
+          { path: meta.path, sha256: release.artifacts[meta.path] ?? null },
+        ]),
+      ),
+      versions: Object.keys(config.releases).sort(),
+    },
+    null,
+    2,
   );
+  return `${doc}\n`;
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
@@ -553,9 +553,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const config = pins(env);
   const version = target.version ?? config.latest;
-  const release = Object.prototype.hasOwnProperty.call(config.releases, version)
-    ? config.releases[version]
-    : undefined;
+  const release = Object.hasOwn(config.releases, version) ? config.releases[version] : undefined;
   if (!release) return errorResponse(404, "unknown version", isShellPath);
 
   // Generated documents: derived from the pins, nothing to fetch or verify.
