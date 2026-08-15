@@ -125,11 +125,24 @@ curl -fsSLO https://get.resq.software/hooks.sh
 sha256sum --ignore-missing -c SHA256SUMS
 ```
 
-Note what this does and does not prove. It proves the bytes match the
-endpoint's pinned digests, and those digests travel with the deploy rather than
-with the response — so a tampering CDN cannot move them. It is **not** a
-signature: verifying offline against a key rather than against us is a separate
-property this does not yet provide.
+Be clear about what that check is worth, because it is easy to overstate.
+
+`SHA256SUMS` and the artifacts both come from `get.resq.software`. Comparing
+them detects a truncated download or corruption in transit; it does **not**
+detect a compromised endpoint, because anything able to alter the artifact can
+serve a manifest that agrees with it. Two files from one origin are one source,
+not two, and this check has no independent trust anchor.
+
+The pinning described above defends a different hop. The Worker verifies what
+GitHub returns against digests baked into its deploy, so a tampered
+`raw.githubusercontent.com` response — or anything altered between the Worker
+and GitHub — is refused before a byte reaches you. That is real, and it is not
+the same as protecting you from us.
+
+Closing the remaining gap needs a signature verifiable offline against a public
+key rather than against our word. Tracked in
+[#58](https://github.com/resq-software/dev/issues/58); until it lands, treat
+these digests as an integrity check, not proof of origin.
 
 Common env vars across all of them:
 - `YES=1` — skip prompts (CI / provisioning)
