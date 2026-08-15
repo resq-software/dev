@@ -287,6 +287,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
+          # setup-node v7 added package-manager-cache, which defaults to TRUE
+          # and turns on npm caching automatically when package.json names a
+          # package manager. zizmor flags that as cache poisoning and is right
+          # to: a poisoned cache would feed the job that decides which bytes
+          # get pinned. Restoring a few seconds of npm download is a trade
+          # worth making here. Not a suppression — caching is genuinely off.
+          package-manager-cache: false
 
       - name: Install worker devDependencies
         working-directory: worker
