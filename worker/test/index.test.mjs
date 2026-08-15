@@ -18,13 +18,21 @@ globalThis.caches = {
 // Imported as .ts directly. Node strips types natively (23.6+), so the tests
 // exercise the same file Wrangler bundles — no build step, and no compiled
 // copy that could drift from the source under review.
-const worker = (
-  await import("../src/index.ts")
-).default;
+const mod = await import("../src/index.ts");
+const { createHandler, validatePinConfig, DEFAULT_PINS } = mod;
+const worker = mod.default;
 
 const ctx = { waitUntil: (p) => p.catch(() => {}) };
-const call = (path, init = {}, env = {}) =>
-  worker.fetch(new Request(`https://get.resq.software${path}`, init), env, ctx);
+const call = (path, init = {}) =>
+  worker.fetch(new Request(`https://get.resq.software${path}`, init), {}, ctx);
+
+// Drive a handler built over a specific pin set. This replaces the RESQ_PINS
+// environment override, which existed only so tests could inject bad pins and
+// was, in production, an unreviewed way to repoint the installer. Same code
+// path — createHandler is what the default export is built from — with no
+// bypass left in the deployed Worker.
+const callWith = (pins, path, init = {}) =>
+  createHandler(pins).fetch(new Request(`https://get.resq.software${path}`, init), {}, ctx);
 
 let pass = 0;
 let fail = 0;
@@ -114,7 +122,12 @@ console.log("\n== generated documents ==");
 console.log("\n== fail closed ==");
 {
   // Real commit, deliberately wrong digest -> must refuse to serve.
-  const tampered = JSON.stringify({
+  //
+  // Injected by constructing a handler, not through an environment variable.
+  // The pins below are structurally valid — 64 hex characters, just not the
+  // right ones — so this exercises the byte comparison in verifiedFetch rather
+  // than the shape validation.
+  const tampered = {
     latest: LATEST,
     releases: {
       [LATEST]: {
@@ -122,8 +135,8 @@ console.log("\n== fail closed ==");
         artifacts: { "install.sh": "0".repeat(64) },
       },
     },
-  });
-  const r = await call("/install.sh", {}, { RESQ_PINS: tampered });
+  };
+  const r = await callWith(tampered, "/install.sh");
   const body = await r.text();
   check("digest mismatch -> 502", r.status === 502, `got ${r.status}`);
   check("no installer bytes leaked", !body.includes("SCRIPT_VERSION"), body.slice(0, 80));
@@ -131,77 +144,82 @@ console.log("\n== fail closed ==");
   check("errors not cached", r.headers.get("cache-control") === "no-store");
 }
 {
-  // Malformed override must fall back to inline pins, never to unverified.
-  const r = await call("/install.sh", {}, { RESQ_PINS: "{ not json" });
-  check("malformed RESQ_PINS falls back to known-good", r.status === 200);
-  const r2 = await call("/install.sh", {}, { RESQ_PINS: '{"latest":"9.9.9","releases":{}}' });
-  check("shape-invalid RESQ_PINS falls back", r2.status === 200);
-}
-{
-  // Every release in an override is validated, not only releases[latest].
-  //
-  // The regression this guards: validating just the latest release let a
-  // second, unchecked release ride along in the same override, so a request
-  // for that version could resolve a commit never checked to be a 40-hex SHA
-  // — i.e. possibly a branch or tag, which move. Serving stayed digest-
-  // verified regardless, but "malformed input degrades to known-good pins" is
-  // the stated contract and it was not being kept.
-  //
-  // Asserted through observable behaviour rather than by reaching into pins():
-  // if the override were accepted, /9.9.9/install.sh would resolve; when it is
-  // rejected the Worker falls back to inline pins, which have no 9.9.9.
-  const mutableRef = JSON.stringify({
+  // validatePinConfig is now the whole contract for "is this a usable pin set".
+  // These assert it directly rather than inferring it from HTTP status codes.
+  // With the RESQ_PINS override gone there is no untrusted pin set at runtime,
+  // so the property worth testing is the validator itself — it is what CI runs
+  // over the inline PINS, and what any caller of createHandler should run first.
+  check("a non-object is rejected", validatePinConfig("{ not json") === null);
+  check("null is rejected", validatePinConfig(null) === null);
+  check("an array is rejected", validatePinConfig([]) === null);
+  check("latest naming no release is rejected", validatePinConfig({ latest: "9.9.9", releases: {} }) === null);
+
+  // `latest` naming a prototype key must not resolve through Object.prototype.
+  check("__proto__ as latest is rejected", validatePinConfig({ latest: "__proto__", releases: {} }) === null);
+
+  // EVERY release is validated, not only releases[latest]. The regression this
+  // guards: a second release riding along with a commit never checked to be a
+  // 40-hex SHA — i.e. possibly a branch or tag, which move.
+  const mutableRef = {
     latest: LATEST,
     releases: {
       [LATEST]: { commit: LATEST_COMMIT, artifacts: { "install.sh": "0".repeat(64) } },
       "9.9.9": { commit: "main", artifacts: { "install.sh": "0".repeat(64) } },
     },
-  });
-  const r3 = await call("/9.9.9/install.sh", {}, { RESQ_PINS: mutableRef });
-  check("override with a non-SHA commit is rejected wholesale", r3.status === 404, `got ${r3.status}`);
+  };
+  check("a non-SHA commit in ANY release rejects the whole set", validatePinConfig(mutableRef) === null);
 
-  const badDigest = JSON.stringify({
-    latest: LATEST,
-    releases: {
-      [LATEST]: { commit: LATEST_COMMIT, artifacts: { "install.sh": "not-a-digest" } },
-    },
-  });
-  const r4 = await call("/install.sh", {}, { RESQ_PINS: badDigest });
-  check("override with a malformed digest falls back", r4.status === 200, `got ${r4.status}`);
+  check(
+    "a malformed digest rejects the whole set",
+    validatePinConfig({
+      latest: LATEST,
+      releases: { [LATEST]: { commit: LATEST_COMMIT, artifacts: { "install.sh": "not-a-digest" } } },
+    }) === null,
+  );
 
-  // `latest` naming a prototype key must not resolve through Object.prototype.
-  const proto = JSON.stringify({ latest: "__proto__", releases: {} });
-  const r5 = await call("/install.sh", {}, { RESQ_PINS: proto });
-  check("__proto__ as latest falls back", r5.status === 200, `got ${r5.status}`);
-
-  // A fully valid override is still honoured. Without this the tests would
-  // pass just as well if pins() rejected everything, which would quietly
-  // disable the override mechanism instead of hardening it.
+  // A fully valid set must be ACCEPTED. Without this the suite would pass just
+  // as well if validatePinConfig rejected everything, which would look like
+  // hardening while actually being broken.
   const artifacts = Object.fromEntries(
     Object.values(bootstrap.artifacts)
       .filter((a) => a.sha256)
       .map((a) => [a.path, a.sha256]),
   );
-  const valid = JSON.stringify({
-    latest: LATEST,
-    releases: { [LATEST]: { commit: LATEST_COMMIT, artifacts } },
-  });
-  const r6 = await call("/install.sh", {}, { RESQ_PINS: valid });
-  const b6 = await r6.text();
-  check("valid override is still accepted", r6.status === 200, `got ${r6.status}`);
-  check("valid override serves the pinned bytes", b6.includes("SCRIPT_VERSION"));
+  const valid = { latest: LATEST, releases: { [LATEST]: { commit: LATEST_COMMIT, artifacts } } };
+  check("a valid pin set is accepted", validatePinConfig(valid) !== null);
+
+  // ...and serves real bytes through the same code path production uses.
+  const r = await callWith(valid, "/install.sh");
+  const body = await r.text();
+  check("a validated set serves the pinned bytes", r.status === 200 && body.includes("SCRIPT_VERSION"), `got ${r.status}`);
+
+  // The documented usage for an untrusted set: validate, else fall back.
+  const fallback = createHandler(validatePinConfig(mutableRef) ?? DEFAULT_PINS);
+  const fb = await fallback.fetch(new Request("https://get.resq.software/9.9.9/install.sh"), {}, ctx);
+  check("validate-or-fall-back yields the inline pins", fb.status === 404, `got ${fb.status}`);
+}
+{
+  // The override is gone: passing one has no effect, because nothing reads it.
+  const r = await worker.fetch(
+    new Request("https://get.resq.software/install.sh"),
+    { RESQ_PINS: JSON.stringify({ latest: "9.9.9", releases: {} }) },
+    ctx,
+  );
+  check("a stray RESQ_PINS env value is ignored entirely", r.status === 200, `got ${r.status}`);
 }
 
 console.log("\n== review findings ==");
 {
-  // The inline pins must satisfy the same rules an override does. They used to
-  // be exempt: pins() returned DEFAULT_PINS unexamined, so the 40-hex commit
-  // rule and the "latest names a real release" rule applied only to the
-  // untrusted path — backwards from where belt-and-braces belongs. Checked here
-  // rather than at module scope on purpose: a throw during module init would
-  // take the endpoint down, while this fails the build before anything deploys.
-  const { validatePinConfig, DEFAULT_PINS } = await import("../src/index.ts");
-  check("inline PINS pass the same validator as an override", validatePinConfig(DEFAULT_PINS) !== null);
+  // The inline pins must satisfy the validator. They used to be exempt: the old
+  // pins() returned DEFAULT_PINS unexamined, so the 40-hex commit rule and the
+  // "latest names a real release" rule applied only to the untrusted path —
+  // backwards from where belt-and-braces belongs. Checked here rather than at
+  // module scope on purpose: a throw during module init would take the endpoint
+  // down, while this fails the build before anything deploys.
+  //
+  // This is also what backs the single `as PinConfig` assertion on DEFAULT_PINS.
+  // The compiler checks the shape; this checks that the strings are really hex.
+  check("inline PINS satisfy validatePinConfig", validatePinConfig(DEFAULT_PINS) !== null);
   check(
     "inline PINS.latest names a real release",
     Object.hasOwn(DEFAULT_PINS.releases, DEFAULT_PINS.latest),

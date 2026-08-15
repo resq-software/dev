@@ -4,9 +4,11 @@
   //   npx wrangler dev      # local, hits the real pinned upstream
   //   npx wrangler deploy   # ship it
   //
-  // The pin set lives in src/index.ts (PINS). A release deploy can override it
-  // without touching source by setting the RESQ_PINS var to the same JSON
-  // shape — see the comment above PINS.
+  // The pin set lives in src/index.ts (PINS) and nowhere else. There is
+  // deliberately no `vars` block: an environment override would be a way to
+  // change what users receive without a reviewed commit, which is the property
+  // that file exists to guarantee. Adding one means rewriting its threat model
+  // first, not just adding a key here.
   //
   // Wrangler transpiles and bundles the TypeScript entrypoint itself; there is
   // no checked-in build output and no separate compile step. `tsc` is only a

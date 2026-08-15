@@ -175,6 +175,34 @@ jobs:
             fail(`after ${elapsedS()}s the live endpoint still serves v${live.version} @ ${String(live.commit).slice(0, 8)} while main declares v${local.version} @ ${local.commit.slice(0, 8)}. Nothing here says the served content is wrong — it says the deploy has not landed. Check Workers Builds first; re-run this if the build was simply slow.`);
           }
 
+          // HEAD must still report a usable content-length, checked against the
+          // real runtime rather than the Node harness. src/index.ts sets this
+          // header on HEAD only, reasoning that GET framing belongs to the
+          // platform — but workerd derives framing from the body, and a null
+          // body could plausibly yield content-length: 0 and overwrite what we
+          // set. That would make the comment in the source a lie, and the unit
+          // tests cannot notice, because they never run inside workerd.
+          {
+            const headRes = await fetch(`${ORIGIN}/install.sh`, {
+              method: "HEAD",
+              cache: "no-store",
+              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            });
+            const declared = Number(headRes.headers.get("content-length"));
+            const bodyRes = await fetch(`${ORIGIN}/install.sh`, {
+              cache: "no-store",
+              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            });
+            const actual = (await bodyRes.arrayBuffer()).byteLength;
+            if (!Number.isFinite(declared) || declared <= 0) {
+              fail(`HEAD /install.sh reported content-length "${headRes.headers.get("content-length")}"; the source promises HEAD carries a real length`);
+            }
+            if (declared !== actual) {
+              fail(`HEAD /install.sh declares ${declared} bytes but GET returns ${actual}`);
+            }
+            console.log(`  HEAD content-length ${declared} matches the body`);
+          }
+
           // Every advertised digest must agree, not only install.sh: a partial
           // deploy could update one artifact and not another.
           for (const [name, meta] of Object.entries(local.artifacts)) {
