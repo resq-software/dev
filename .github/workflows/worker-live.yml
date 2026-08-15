@@ -64,6 +64,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
+          # v7 enables npm caching by default via package-manager-cache. This
+          # job installs nothing, so the cache buys nothing — and a monitor
+          # that verifies live bytes should not be reading from a shared,
+          # writable cache at all. See required.yml for the same reasoning.
+          package-manager-cache: false
 
       - name: Compare the live endpoint against this commit
         run: |
