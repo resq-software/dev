@@ -17,8 +17,13 @@ teardown() {
 push_line() { printf '%s %s %s %s\n' "$1" "$2" "$3" "$4"; }
 
 @test "accepts feat/ branch name" {
+    # Supplies ref records like its negative counterpart. Without them the hook
+    # has no ref to judge and exits 0 regardless, so this would pass even with
+    # the naming rule deleted — the assertion has to cost something.
     git -C "$REPO" checkout -q -b feat/add-thing
-    run bash -c "cd '$REPO' && bash .git-hooks/pre-push origin git@example </dev/null"
+    LOCAL=$(git -C "$REPO" rev-parse HEAD)
+    LINE="$(push_line refs/heads/feat/add-thing "$LOCAL" refs/heads/feat/add-thing "0000000000000000000000000000000000000000")"
+    run bash -c "cd '$REPO' && printf '%s\n' '$LINE' | bash .git-hooks/pre-push origin git@example"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Pre-push checks passed"* ]]
 }
