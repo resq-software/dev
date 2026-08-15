@@ -339,13 +339,19 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      # The one checkout in this repo that legitimately keeps the token: this
-      # job pushes the bump branch. Every other checkout sets
-      # persist-credentials: false.
+      # This job pushes, so it needs a credential — but not for its whole life.
+      # persist-credentials writes the token into .git/config at checkout, where
+      # it then sits through `gen-pins.sh --write` (which runs node and sh) and
+      # through any step someone adds later. zizmor flags that as artipacked and
+      # the objection is sound: the token outlives its purpose.
+      #
+      # So nothing is persisted, and the push step below attaches a credential
+      # to the remote only for the moment it needs one.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: main
+          persist-credentials: false
 
       - name: Regenerate PINS
         id: bump
@@ -376,6 +382,13 @@ jobs:
           git checkout -b "$branch"
           git add worker/src/index.ts
           git commit -m "chore(worker): pin get.resq.software to v$VERSION"
+
+          # The checkout persisted no credential, so attach one to origin here.
+          # Scoped to this step: the token is in .git/config for the fetch and
+          # push and nothing else, rather than for the whole job. GitHub masks
+          # the value in logs, and the runner is torn down afterwards.
+          git remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           # --force-with-lease compares against the remote-tracking ref, which
           # does not exist here unless we fetch it first: `ref: main` above only
