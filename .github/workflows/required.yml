@@ -306,6 +306,15 @@ jobs:
         working-directory: worker
         run: npm run typecheck
 
+      # Biome, pinned to the same 2.5.2 that resq-software/npm standardises on,
+      # so this repo and the org's TypeScript repo report the same findings.
+      # It runs on Biome's defaults with no biome.json on purpose — the org
+      # config's formatter unquotes the generated PINS keys that gen-pins.sh
+      # writes back, and the two would fight forever. Defaults lint clean.
+      - name: Lint (biome)
+        working-directory: worker
+        run: npm run lint
+
       # Also validates the inline PINS fallback in worker/src/index.ts: with no
       # RESQ_PINS override the suite exercises those pins against live GitHub,
       # so digests that have rotted surface here as a 502 rather than in
