@@ -192,6 +192,98 @@ console.log("\n== fail closed ==");
   check("valid override serves the pinned bytes", b6.includes("SCRIPT_VERSION"));
 }
 
+console.log("\n== review findings ==");
+{
+  // The inline pins must satisfy the same rules an override does. They used to
+  // be exempt: pins() returned DEFAULT_PINS unexamined, so the 40-hex commit
+  // rule and the "latest names a real release" rule applied only to the
+  // untrusted path — backwards from where belt-and-braces belongs. Checked here
+  // rather than at module scope on purpose: a throw during module init would
+  // take the endpoint down, while this fails the build before anything deploys.
+  const { validatePinConfig, DEFAULT_PINS } = await import("../src/index.ts");
+  check("inline PINS pass the same validator as an override", validatePinConfig(DEFAULT_PINS) !== null);
+  check(
+    "inline PINS.latest names a real release",
+    Object.hasOwn(DEFAULT_PINS.releases, DEFAULT_PINS.latest),
+    DEFAULT_PINS.latest,
+  );
+  const badCommits = Object.entries(DEFAULT_PINS.releases)
+    .filter(([, r]) => !/^[0-9a-f]{40}$/.test(r.commit))
+    .map(([v]) => v);
+  check("every inline commit is a 40-hex SHA, not a branch or tag", badCommits.length === 0, badCommits.join(","));
+}
+{
+  // The top-level catch classified by full URL, so a query string moved an
+  // artifact into the wrong body format: /install.ps1?v=1 does not end in
+  // ".ps1", so a PowerShell client was handed a #!/bin/sh body.
+  const realDigest = crypto.subtle.digest;
+  let psStatus, psBody, shBody;
+  try {
+    crypto.subtle.digest = () => {
+      throw new Error("synthetic failure");
+    };
+    const ps = await call("/install.ps1?v=1");
+    psStatus = ps.status;
+    psBody = await ps.text();
+    shBody = await (await call("/install.sh?x=.json")).text();
+  } finally {
+    crypto.subtle.digest = realDigest;
+  }
+  check("throw on .ps1?query -> 500", psStatus === 500, `got ${psStatus}`);
+  check("throw on .ps1?query -> NOT a shell body", !psBody.startsWith("#!/bin/sh"), psBody.slice(0, 30));
+  check("throw on .sh?x=.json -> still inert shell", shBody.startsWith("#!/bin/sh"), shBody.slice(0, 30));
+}
+{
+  // 405 obeys the "shell routes get inert shell bodies" rule too.
+  const r = await call("/install.sh", { method: "POST" });
+  const body = await r.text();
+  check("POST /install.sh -> 405", r.status === 405, `got ${r.status}`);
+  check("405 allow header", r.headers.get("allow") === "GET, HEAD");
+  check("405 on a shell route is inert shell", body.startsWith("#!/bin/sh") && body.includes("exit 1"));
+  const rp = await call("/install.ps1", { method: "POST" });
+  check("405 on a .ps1 route is not shell", !(await rp.text()).startsWith("#!/bin/sh"));
+}
+{
+  // SHA256SUMS must name artifacts the way clients receive them, or
+  // `sha256sum -c` fails on the filename for every route whose repo path
+  // differs — which is all of them except install.sh and install.ps1.
+  const sums = await (await call("/SHA256SUMS")).text();
+  const names = sums.trim().split("\n").map((l) => l.split(/\s+/)[1]);
+  check("SHA256SUMS names routes, not repo paths", names.includes("hooks.sh"), names.join(" "));
+  check("SHA256SUMS has no repo paths left", !names.some((n) => n.includes("/")), names.join(" "));
+  check("SHA256SUMS is sha256sum -c shaped", /^[0-9a-f]{64} {2}\S+$/.test(sums.trim().split("\n")[0]));
+  check("SHA256SUMS ends with a newline", sums.endsWith("\n"));
+}
+{
+  // Alias parity: hooks.sh had a repo-basename alias, hooks.ps1 did not.
+  const r = await call("/install-hooks.ps1");
+  check("install-hooks.ps1 alias resolves", r.status === 200, `got ${r.status}`);
+  check("alias serves a non-empty artifact", (await r.text()).length > 0);
+}
+{
+  // Conditional requests: weak tags and comma-separated lists are valid
+  // If-None-Match syntax and were previously missed, costing a full body.
+  const first = await call("/install.sh");
+  const etag = first.headers.get("etag");
+  const strong = await call("/install.sh", { headers: { "if-none-match": etag } });
+  check("exact etag -> 304", strong.status === 304, `got ${strong.status}`);
+  check("304 carries cache-control", !!strong.headers.get("cache-control"), "missing");
+  const weak = await call("/install.sh", { headers: { "if-none-match": `W/${etag}` } });
+  check("weak etag -> 304", weak.status === 304, `got ${weak.status}`);
+  const list = await call("/install.sh", { headers: { "if-none-match": `"other", ${etag}` } });
+  check("etag in a list -> 304", list.status === 304, `got ${list.status}`);
+  const star = await call("/install.sh", { headers: { "if-none-match": "*" } });
+  check("* -> 304", star.status === 304, `got ${star.status}`);
+  const miss = await call("/install.sh", { headers: { "if-none-match": '"nope"' } });
+  check("non-matching etag -> 200", miss.status === 200, `got ${miss.status}`);
+}
+{
+  // content-length is a HEAD-only claim now: on GET the runtime owns framing.
+  const head = await call("/install.sh", { method: "HEAD" });
+  check("HEAD reports content-length", !!head.headers.get("content-length"));
+  check("HEAD has no body", (await head.text()) === "");
+}
+
 console.log("\n== rejected requests ==");
 {
   const cases = [

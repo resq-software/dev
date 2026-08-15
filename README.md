@@ -115,7 +115,21 @@ Each script can be run on its own without going through the full onboarding flow
 
 Every one of these is served pinned and hash-verified, and each has a
 version-locked form — `https://get.resq.software/v0.4.0/hooks.sh` and so on.
-`https://get.resq.software/SHA256SUMS` lists the digest of all of them.
+`https://get.resq.software/SHA256SUMS` lists the digest of all of them, keyed
+by the route name you fetch, so it works directly with `sha256sum -c`:
+
+```sh
+curl -fsSLO https://get.resq.software/SHA256SUMS
+curl -fsSLO https://get.resq.software/install.sh
+curl -fsSLO https://get.resq.software/hooks.sh
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+Note what this does and does not prove. It proves the bytes match the
+endpoint's pinned digests, and those digests travel with the deploy rather than
+with the response — so a tampering CDN cannot move them. It is **not** a
+signature: verifying offline against a key rather than against us is a separate
+property this does not yet provide.
 
 Common env vars across all of them:
 - `YES=1` — skip prompts (CI / provisioning)
