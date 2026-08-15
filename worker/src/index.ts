@@ -39,32 +39,18 @@
  * Corollary: bumping the installer is a deliberate, reviewable act — edit
  * PINS, deploy. It can no longer happen as a side effect of pushing to main.
  *
- * ── Where that claim stops being true ──────────────────────────────────────
+ * That corollary is unconditional, and it was not always. A RESQ_PINS variable
+ * used to override the pin set at request time, so anyone who could set a
+ * Worker variable — dashboard access or an API token — could repoint the
+ * installer at an arbitrary {commit, digest} pair with no PR and no review. It
+ * brought its own digests, so verification still passed, against attacker-
+ * chosen expectations: a complete bypass rather than a partial one.
  *
- * The RESQ_PINS variable is a second way in, and it is not review-gated.
- * Anyone who can set a Worker variable — dashboard access or an API token —
- * can supply an arbitrary {commit, digest} pair for this repo with no PR, no
- * diff and no approval. The override brings its own digests, so it is
- * internally consistent, which is exactly what makes it a complete bypass
- * rather than a partial one: verification still passes, against attacker-
- * chosen expectations.
- *
- * So the trust anchor is not "the PINS block" alone. It is "the PINS block OR
- * whoever holds Cloudflare credentials for this Worker". Anyone auditing this
- * file should treat those credentials as equivalent to commit access on the
- * installer, and scope them accordingly.
- *
- * Nothing sets RESQ_PINS today: there is no `vars` block in wrangler.jsonc and
- * no workflow that writes one. It survives because the test suite uses it to
- * inject deliberately-wrong pins and assert this Worker refuses to serve them
- * — see "digest mismatch -> 502". Its original purpose (letting a release
- * deploy avoid rewriting source) is obsolete: bin/gen-pins.sh --write now
- * edits PINS and opens a PR, which is the reviewable path this header claims.
- *
- * If that testing use ever finds another home, delete the override and the
- * claim above becomes unconditional. Removing it is safe by construction —
- * with no override, pins() returns the inline set, which is what the docs
- * already promise users are getting.
+ * It survived only because the tests needed a way to inject deliberately-wrong
+ * pins. createHandler(config) serves that better — a test constructs its own
+ * handler over the same code path — so the override is gone and there is now
+ * no way to change what this Worker serves except by editing PINS and
+ * deploying. The trust anchor is the PINS block, full stop.
  *
  * ── A note on types ────────────────────────────────────────────────────────
  *
@@ -102,6 +88,14 @@
 // the Worker keeps shipping zero runtime dependencies and the bundle is
 // unchanged. Its runtime helpers (brandRefiner, unsafeBrand) are deliberately
 // NOT imported; validatePinConfig below does that job without the dependency.
+// Spelled out for anyone auditing this file in isolation, which is much of its
+// point: `Brand<T, B>` is `T & { readonly [unique symbol]: { [K in B]: true } }`
+// — a phantom tag, erased at compile time. A branded value is still a T; a bare
+// T is not assignable to the branded type without passing a check first.
+//
+// Imported rather than redefined so this repo and resq-software/npm mean the
+// same thing by a brand. It is `export type`, so verbatimModuleSyntax erases the
+// import outright — verified: zero occurrences of "resq-systems" in the bundle.
 import type { Brand } from "@resq-systems/types";
 
 /** A 64-char lowercase SHA-256: checked by isRelease, or computed by sha256Hex. */
@@ -115,20 +109,41 @@ export type Sha256Hex = Brand<string, "Sha256Hex">;
  */
 export type CommitSha = Brand<string, "CommitSha">;
 
-export interface Release {
-  commit: CommitSha;
-  artifacts: Record<string, Sha256Hex>;
+/**
+ * Generic over its string types so the same shape can be stated twice: once
+ * structurally (what gen-pins.sh must emit) and once with proof (what the rest
+ * of this file may rely on).
+ *
+ * Without the parameters the only way to type the generated PINS block was
+ * `as unknown as PinConfig`, which silences EVERY structural check — a block
+ * with `"commit": 42` or `"artifacts": []` would have compiled clean. See
+ * RAW_PINS below.
+ */
+export interface Release<S = CommitSha, D = Sha256Hex> {
+  commit: S;
+  artifacts: Record<string, D>;
 }
 
-export interface PinConfig {
+export interface PinConfig<S = CommitSha, D = Sha256Hex> {
   latest: string;
-  releases: Record<string, Release>;
+  releases: Record<string, Release<S, D>>;
 }
 
-export interface Env {
-  /** Optional wholesale pin override, same JSON shape as PINS. */
-  RESQ_PINS?: string;
-}
+/**
+ * No variables, deliberately.
+ *
+ * This used to carry RESQ_PINS, a wholesale pin override read at request time.
+ * It meant anyone who could set a Worker variable could repoint the installer
+ * at an arbitrary {commit, digest} pair with no PR and no review — internally
+ * consistent, and therefore a complete bypass of the header's central claim
+ * rather than a partial one.
+ *
+ * It survived only because tests injected deliberately-wrong pins through it.
+ * createHandler() gives them a better route: the pin set is a constructor
+ * argument, so a test builds its own handler and production has no override at
+ * all. The claim above PINS is now unconditional.
+ */
+export type Env = Record<string, never>;
 
 interface ArtifactMeta {
   path: string;
@@ -156,9 +171,10 @@ interface RouteTarget {
 //     printf '%s  %s\n' "$(git cat-file blob "$C:$f" | sha256sum | cut -d' ' -f1)" "$f"
 //   done
 //
-// CI can override this wholesale via the RESQ_PINS var (same JSON shape) so a
-// release deploy never has to rewrite source. A malformed override falls back
-// to the inline pins below — degrading to a known-good pin, never to unpinned.
+// This is the only pin set. There is no environment override and no way to
+// change what is served without editing this block and deploying — which is a
+// reviewed PR, because bin/gen-pins.sh --write produces exactly this edit and
+// release.yml opens a pull request with it.
 //
 // DELIBERATELY UNANNOTATED. bin/gen-pins.sh rewrites this block by text
 // surgery: it locates `^const PINS = {`, finds the closing `^};`, and emits
@@ -210,24 +226,35 @@ const PINS = {
   }
 };
 
-// The inline pins, as a PinConfig.
+// The inline pins, in two steps, because two different things are being
+// claimed and only one of them is the compiler's to check.
 //
-// The cast is unavoidable and deliberate: PINS is generated JSON, so its
-// commit/digest strings are plain `string` and cannot carry the CommitSha and
-// Sha256Hex brands without going through validatePinConfig — which cannot run
-// here, because there is nothing to fall back TO if it fails.
+// What backs the second step is a CI test running the real validatePinConfig
+// over these pins. That is deliberate over validating at module scope: a throw
+// during module initialisation takes the whole endpoint down, whereas a bad pin
+// caught in CI never deploys. And the failure mode is availability, not
+// integrity — verifiedFetch still compares bytes against digests, so a commit
+// of "main" would yield 502s, never wrong bytes.
 //
-// So this is checked at CI time instead, by a test that runs the real
-// validatePinConfig over these very pins. That is a deliberate choice over
-// validating at module scope: a throw during module initialisation takes the
-// whole endpoint down, whereas a bad pin caught in CI never deploys at all.
-// Getting this wrong is an availability failure, not an integrity one —
-// verifiedFetch still compares bytes to digests, so a commit of "main" would
-// produce 502s, never wrong bytes.
+// STRUCTURE is checked by the compiler, right here. If gen-pins.sh ever emits a
+// release with `"commit": 42`, `"artifacts": []`, or no commit key at all, this
+// line fails to compile — which is what the comment above has always promised.
+//
+// An earlier revision wrote `PINS as unknown as PinConfig` to satisfy the
+// brands, silencing all of that while leaving the promise in place. Splitting
+// the two properties apart keeps each honest.
+const RAW_PINS: PinConfig<string, string> = PINS;
+
+// PROOF is the part the compiler cannot supply: it knows these are strings, not
+// that they passed the hex checks. So exactly one assertion, applying exactly
+// that one fact, with no `unknown` hop — PinConfig<CommitSha, Sha256Hex> is
+// assignable to PinConfig<string, string>, so the two are comparable and this
+// cast is legal on its own.
+//
 // Exported so the CI test can run validatePinConfig over exactly these pins.
 // Safe against gen-pins.sh: it rewrites only from `^const PINS = {` through the
-// closing `^};`, and this line sits after that block.
-export const DEFAULT_PINS = PINS as unknown as PinConfig;
+// closing `^};`, and these lines sit after that block.
+export const DEFAULT_PINS = RAW_PINS as PinConfig;
 
 const REPO = "resq-software/dev";
 
@@ -280,10 +307,14 @@ function isRelease(value: unknown): value is Release {
 }
 
 /**
- * Validate an entire pin set, returning it typed or null. Exported so the test
- * suite can run it over the INLINE pins as well as the override — the rules
- * below were previously enforced only on the untrusted path, which is exactly
- * backwards from where belt-and-braces belongs.
+ * Validate an entire pin set, returning it typed or null.
+ *
+ * Nothing in the request path calls this any more — there is no untrusted pin
+ * set at runtime now that the RESQ_PINS override is gone. Its job is to be the
+ * executable specification of a valid pin set, run by CI over the inline PINS
+ * and by any caller of createHandler that wants to check a set first. It lives
+ * beside the pins on purpose: a spec kept in the test file drifts from the data
+ * it describes.
  */
 export function validatePinConfig(value: unknown): PinConfig | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -311,18 +342,6 @@ export function validatePinConfig(value: unknown): PinConfig | null {
   return { latest, releases } as PinConfig;
 }
 
-function pins(env: Env | undefined): PinConfig {
-  if (!env || typeof env.RESQ_PINS !== "string") return DEFAULT_PINS;
-  try {
-    // JSON.parse returns `any`, so the value is treated as `unknown` and
-    // narrowed by checks rather than by assertion. A bare `as PinConfig` would
-    // have the compiler vouch for a shape nothing had actually verified.
-    return validatePinConfig(JSON.parse(env.RESQ_PINS)) ?? DEFAULT_PINS;
-  } catch {
-    return DEFAULT_PINS;
-  }
-}
-
 function hex(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let out = "";
@@ -332,13 +351,19 @@ function hex(buffer: ArrayBuffer): string {
   return out;
 }
 
-async function sha256Hex(bytes: Uint8Array | ArrayBuffer): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+// Returns a branded digest: hex() over a SHA-256 output is 64 lowercase hex
+// characters by construction, so this is one of the two places entitled to mint
+// a Sha256Hex. The other is isRelease, which checks the regex.
+async function sha256Hex(bytes: Uint8Array | ArrayBuffer): Promise<Sha256Hex> {
+  return hex(await crypto.subtle.digest("SHA-256", bytes as BufferSource)) as Sha256Hex;
 }
 
 // Length-independent comparison. These digests are public so timing is not a
 // real oracle, but comparing this way costs nothing and keeps the habit.
-function digestsEqual(a: string | undefined, b: string | undefined): boolean {
+// Both sides must be digests. Typed as string, this happily accepted
+// digestsEqual(release.commit, expected) — comparing a commit SHA against a
+// content digest, which is exactly the confusion the brands exist to catch.
+function digestsEqual(a: Sha256Hex | undefined, b: Sha256Hex | undefined): boolean {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -375,10 +400,6 @@ async function readCapped(response: Response, max: number): Promise<Uint8Array |
   return out;
 }
 
-// Error bodies for shell routes are themselves valid shell that exits nonzero.
-// `curl -fsSL` suppresses error bodies, but people drop -f, and a bare English
-// sentence piped into sh is a command. This makes the failure mode inert.
-// Messages come from a fixed set — no request data is ever reflected.
 // Whether a failure on this route must be answered with inert shell.
 //
 // Takes a PATHNAME, never a full URL. The top-level catch used to test
@@ -413,6 +434,10 @@ function etagMatches(header: string | null, etag: string): boolean {
   });
 }
 
+// Error bodies for shell routes are themselves valid shell that exits nonzero.
+// `curl -fsSL` suppresses error bodies, but people drop -f, and a bare English
+// sentence piped into sh is a command. This makes the failure mode inert.
+// Messages come from a fixed set — no request data is ever reflected.
 function errorBody(message: string, asShell: boolean): string {
   if (!asShell) return `resq: ${message}\n`;
   return `#!/bin/sh\n# resq installer: ${message}\nprintf '%s\\n' 'resq installer: ${message}' >&2\nexit 1\n`;
@@ -513,10 +538,16 @@ function cachePut(ctx: ExecutionContext, key: Request, response: Response): void
   }
 }
 
+// commit is a CommitSha and expectedDigest a Sha256Hex, not two strings. Both
+// are interpolated into a URL or a cache key below, and this is the one place
+// where a non-SHA commit would produce a genuinely strange upstream request —
+// so the guarantee is worth having at the boundary rather than upstream of it.
+// It also makes verifiedFetch(expected, meta.path, commit, ctx) a type error;
+// previously it compiled.
 async function verifiedFetch(
-  commit: string,
+  commit: CommitSha,
   repoPath: string,
-  expectedDigest: string,
+  expectedDigest: Sha256Hex,
   ctx: ExecutionContext,
 ): Promise<Uint8Array | null> {
   const cacheKey = new Request(`https://pin.resq.internal/${commit}/${repoPath}`);
@@ -651,40 +682,62 @@ function manifest(config: PinConfig, version: string, release: Release): string 
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Classify BEFORE the try. Deciding this inside the catch would mean the
-    // recovery path depends on work that can itself fail — and URL parsing is
-    // the one step here that can throw on a malformed request. If it does, the
-    // shell default is the safe answer: an inert `#!/bin/sh` body is harmless
-    // to a PowerShell reader, whereas HTML reaching `curl | sh` is not.
-    let asShell = true;
-    try {
-      asShell = isShellPathname(new URL(request.url).pathname);
-    } catch {
-      /* keep the shell default */
-    }
+/**
+ * Build a handler bound to one pin set.
+ *
+ * The pin set is a constructor argument rather than an environment variable,
+ * and that is the whole point. RESQ_PINS used to let anyone who could set a
+ * Worker variable repoint the installer with no PR and no review; it existed
+ * only because tests needed a way to inject deliberately-wrong pins. A factory
+ * serves the tests better — they build their own handler over the same code
+ * path — and leaves production with no override to abuse.
+ *
+ * Callers passing anything other than DEFAULT_PINS should run it through
+ * validatePinConfig first; this constructor trusts what it is given, because
+ * the only untrusted source it ever had has been removed.
+ */
+export function createHandler(config: PinConfig): ExportedHandler<Env> {
+  return {
+    async fetch(request: Request, _env: Env, ctx: ExecutionContext): Promise<Response> {
+      // Classify BEFORE the try. Deciding this inside the catch would mean the
+      // recovery path depends on work that can itself fail — and URL parsing is
+      // the one step here that can throw on a malformed request. If it does, the
+      // shell default is the safe answer: an inert `#!/bin/sh` body is harmless
+      // to a PowerShell reader, whereas HTML reaching `curl | sh` is not.
+      let asShell = true;
+      try {
+        asShell = isShellPathname(new URL(request.url).pathname);
+      } catch {
+        /* keep the shell default */
+      }
 
-    // Any exception escaping here becomes a runtime 500 whose body is
-    // Cloudflare's HTML error page — which is exactly what someone's `curl | sh`
-    // would then execute. Every deliberate failure path in this file returns an
-    // inert shell body precisely to avoid that, so an unhandled throw must not
-    // be the one route that bypasses it.
-    try {
-      return await handle(request, env, ctx);
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          event: "unhandled_error",
-          message: String(err instanceof Error ? err.message : err),
-        }),
-      );
-      return errorResponse(500, "internal error - refusing to serve", asShell);
-    }
-  },
-} satisfies ExportedHandler<Env>;
+      // Any exception escaping here becomes a runtime 500 whose body is
+      // Cloudflare's HTML error page — which is exactly what someone's
+      // `curl | sh` would then execute. Every deliberate failure path in this
+      // file returns an inert shell body precisely to avoid that, so an
+      // unhandled throw must not be the one route that bypasses it.
+      try {
+        return await handle(request, config, ctx);
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            event: "unhandled_error",
+            message: String(err instanceof Error ? err.message : err),
+          }),
+        );
+        return errorResponse(500, "internal error - refusing to serve", asShell);
+      }
+    },
+  };
+}
 
-async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+export default createHandler(DEFAULT_PINS);
+
+async function handle(
+  request: Request,
+  config: PinConfig,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const url = new URL(request.url);
   const isShellPath = isShellPathname(url.pathname);
 
@@ -700,7 +753,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const target = route(url.pathname);
   if (!target) return errorResponse(404, "not found", isShellPath);
 
-  const config = pins(env);
   const version = target.version ?? config.latest;
   const release = Object.hasOwn(config.releases, version) ? config.releases[version] : undefined;
   if (!release) return errorResponse(404, "unknown version", isShellPath);

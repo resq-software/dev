@@ -315,10 +315,13 @@ jobs:
         working-directory: worker
         run: npm run lint
 
-      # Also validates the inline PINS fallback in worker/src/index.ts: with no
-      # RESQ_PINS override the suite exercises those pins against live GitHub,
-      # so digests that have rotted surface here as a 502 rather than in
+      # Also validates the inline PINS in worker/src/index.ts against live
+      # GitHub, so digests that have rotted surface here as a 502 rather than in
       # production, where the Worker would correctly refuse to serve anything.
+      #
+      # And it backs the single `as PinConfig` assertion on DEFAULT_PINS: the
+      # compiler checks the shape, this suite checks the strings really are hex,
+      # by running the exported validatePinConfig over those very pins.
       - name: Worker test suite
         run: |
           set -euo pipefail
