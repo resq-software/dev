@@ -39,6 +39,17 @@
  * Corollary: bumping the installer is a deliberate, reviewable act — edit
  * PINS, deploy. It can no longer happen as a side effect of pushing to main.
  *
+ * ── A note on types ────────────────────────────────────────────────────────
+ *
+ * Types here are a maintainability tool, not a security control, and it is
+ * worth being honest about that: neither of this Worker's two production
+ * outages would have been caught by the compiler. `caches` is declared in
+ * @cloudflare/workers-types, so the missing-binding ReferenceError typechecked
+ * fine; and `redirect: "error"` is valid in the standard RequestInit, so the
+ * call workerd rejects at runtime is the one TypeScript approves. Both were
+ * runtime divergences from the type definitions. The tests and the live
+ * monitor catch those; the compiler does not.
+ *
  * ── Using it ───────────────────────────────────────────────────────────────
  *
  *   curl -fsSL https://get.resq.software | sh
@@ -49,6 +60,35 @@
  *   curl -fsSL https://get.resq.software/install.sh | sha256sum
  *   curl -fsSI https://get.resq.software | grep x-resq-sha256
  */
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface Release {
+  commit: string;
+  artifacts: Record<string, string>;
+}
+
+export interface PinConfig {
+  latest: string;
+  releases: Record<string, Release>;
+}
+
+export interface Env {
+  /** Optional wholesale pin override, same JSON shape as PINS. */
+  RESQ_PINS?: string;
+}
+
+interface ArtifactMeta {
+  path: string;
+  type: string;
+  /** Whether a failure body for this route must itself be inert shell. */
+  shell: boolean;
+}
+
+interface RouteTarget {
+  version: string | null;
+  name: string;
+}
 
 // ── Pin set ─────────────────────────────────────────────────────────────────
 //
@@ -67,6 +107,14 @@
 // CI can override this wholesale via the RESQ_PINS var (same JSON shape) so a
 // release deploy never has to rewrite source. A malformed override falls back
 // to the inline pins below — degrading to a known-good pin, never to unpinned.
+//
+// DELIBERATELY UNANNOTATED. bin/gen-pins.sh rewrites this block by text
+// surgery: it locates `^const PINS = {`, finds the closing `^};`, and emits
+// `const PINS = <json>;`. A `: PinConfig` annotation or a trailing `satisfies`
+// clause would either be silently discarded on the next --write or break the
+// closing-brace match outright. The type is applied on the line after the
+// block instead, which the generator never touches — so the generated JSON is
+// still checked against PinConfig at compile time.
 
 const PINS = {
   "latest": "0.4.2",
@@ -110,6 +158,11 @@ const PINS = {
   }
 };
 
+// The type check on the generated block. If gen-pins.sh ever emits something
+// structurally wrong — a missing commit, artifacts as an array — this line
+// fails to compile.
+const DEFAULT_PINS: PinConfig = PINS;
+
 const REPO = "resq-software/dev";
 
 // Cap well above the largest artifact (install.ps1, ~27 KB) and far below any
@@ -123,7 +176,7 @@ const PWSH = "text/plain; charset=utf-8";
 // Public route name -> repo path. Routes resolve through this table, so a
 // request path is never interpolated into the upstream URL. Path traversal is
 // structurally impossible rather than filtered.
-const ARTIFACTS = {
+const ARTIFACTS: Record<string, ArtifactMeta> = {
   "install.sh": { path: "install.sh", type: SHELL, shell: true },
   "install.ps1": { path: "install.ps1", type: PWSH, shell: false },
   "hooks.sh": { path: "scripts/install-hooks.sh", type: SHELL, shell: true },
@@ -134,42 +187,51 @@ const ARTIFACTS = {
 };
 
 // Accept the repo basename too, so a URL copied out of the repo still works.
-const ALIASES = {
+const ALIASES: Record<string, string> = {
   "install-hooks.sh": "hooks.sh",
   "install-resq.sh": "resq.sh",
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function pins(env) {
-  if (!env || typeof env.RESQ_PINS !== "string") return PINS;
+function pins(env: Env | undefined): PinConfig {
+  if (!env || typeof env.RESQ_PINS !== "string") return DEFAULT_PINS;
   try {
-    const parsed = JSON.parse(env.RESQ_PINS);
+    const parsed = JSON.parse(env.RESQ_PINS) as Partial<PinConfig>;
     // Validate the shape before trusting it. A half-formed override that
     // slipped through a bad deploy must not disable verification.
-    const rel = parsed?.releases?.[parsed?.latest];
-    if (!rel || !/^[0-9a-f]{40}$/.test(rel.commit ?? "")) return PINS;
-    if (!rel.artifacts || typeof rel.artifacts !== "object") return PINS;
-    return parsed;
+    //
+    // Typed as Partial and probed field by field on purpose: JSON.parse returns
+    // `any`, and a bare `as PinConfig` would have the compiler vouch for a
+    // shape nothing actually checked. The runtime guards are the real control
+    // here, exactly as before.
+    const latest = parsed?.latest;
+    if (typeof latest !== "string") return DEFAULT_PINS;
+    const rel = parsed?.releases?.[latest];
+    if (!rel || !/^[0-9a-f]{40}$/.test(rel.commit ?? "")) return DEFAULT_PINS;
+    if (!rel.artifacts || typeof rel.artifacts !== "object") return DEFAULT_PINS;
+    return parsed as PinConfig;
   } catch {
-    return PINS;
+    return DEFAULT_PINS;
   }
 }
 
-function hex(buffer) {
+function hex(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let out = "";
-  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+  // for..of rather than an index loop: identical output, and it does not trip
+  // noUncheckedIndexedAccess.
+  for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
   return out;
 }
 
-async function sha256Hex(bytes) {
-  return hex(await crypto.subtle.digest("SHA-256", bytes));
+async function sha256Hex(bytes: Uint8Array | ArrayBuffer): Promise<string> {
+  return hex(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
 }
 
 // Length-independent comparison. These digests are public so timing is not a
 // real oracle, but comparing this way costs nothing and keeps the habit.
-function digestsEqual(a, b) {
+function digestsEqual(a: string | undefined, b: string | undefined): boolean {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -178,17 +240,18 @@ function digestsEqual(a, b) {
 
 // Read a body with a hard ceiling, enforced as chunks arrive. Returns null if
 // the cap is exceeded so the caller can fail closed.
-async function readCapped(response, max) {
+async function readCapped(response: Response, max: number): Promise<Uint8Array | null> {
   const declared = response.headers.get("content-length");
   if (declared !== null && Number(declared) > max) return null;
   if (!response.body) return null;
 
   const reader = response.body.getReader();
-  const chunks = [];
+  const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (!value) continue;
     total += value.byteLength;
     if (total > max) {
       await reader.cancel();
@@ -209,12 +272,12 @@ async function readCapped(response, max) {
 // `curl -fsSL` suppresses error bodies, but people drop -f, and a bare English
 // sentence piped into sh is a command. This makes the failure mode inert.
 // Messages come from a fixed set — no request data is ever reflected.
-function errorBody(message, asShell) {
+function errorBody(message: string, asShell: boolean): string {
   if (!asShell) return `resq: ${message}\n`;
   return `#!/bin/sh\n# resq installer: ${message}\nprintf '%s\\n' 'resq installer: ${message}' >&2\nexit 1\n`;
 }
 
-function baseHeaders() {
+function baseHeaders(): Record<string, string> {
   return {
     "x-content-type-options": "nosniff",
     "content-security-policy": "default-src 'none'; sandbox",
@@ -225,7 +288,7 @@ function baseHeaders() {
   };
 }
 
-function errorResponse(status, message, asShell) {
+function errorResponse(status: number, message: string, asShell: boolean): Response {
   return new Response(errorBody(message, asShell), {
     status,
     headers: {
@@ -246,17 +309,24 @@ function errorResponse(status, message, asShell) {
 //   /SHA256SUMS              -> digest manifest, sha256sum -c format
 //   /manifest.json           -> full pin metadata
 // Anything deeper, or any unknown name, is a 404.
-function route(pathname) {
+function route(pathname: string): RouteTarget | null {
   const parts = pathname.split("/").filter(Boolean);
 
   if (parts.length === 0) return { version: null, name: "install.sh" };
   if (parts.length > 2) return null;
 
-  let version = null;
-  let name = parts[0];
+  let version: string | null = null;
+  // Read through locals rather than indexing twice: a length check does not
+  // narrow element types under noUncheckedIndexedAccess, and an explicit
+  // undefined check is clearer than a non-null assertion.
+  const first = parts[0];
+  if (first === undefined) return null;
+  let name = first;
   if (parts.length === 2) {
-    version = parts[0].replace(/^v/, "");
-    name = parts[1];
+    const second = parts[1];
+    if (second === undefined) return null;
+    version = first.replace(/^v/, "");
+    name = second;
   }
 
   if (name === "SHA256SUMS" || name === "manifest.json") return { version, name };
@@ -278,7 +348,11 @@ function route(pathname) {
 // always present, which turned "cache unavailable" into an unhandled exception
 // and a 500 on every artifact route, while /manifest.json — which needs no
 // cache — kept working and made the Worker look healthy.
-async function cacheMatch(key) {
+//
+// The compiler is no help here: workers-types declares `caches`, so the version
+// that crashed typechecked cleanly. These guards stay because the runtime, not
+// the type, decides.
+async function cacheMatch(key: Request): Promise<Response | undefined> {
   try {
     if (typeof caches === "undefined" || !caches.default) return undefined;
     return await caches.default.match(key);
@@ -287,7 +361,7 @@ async function cacheMatch(key) {
   }
 }
 
-function cachePut(ctx, key, response) {
+function cachePut(ctx: ExecutionContext, key: Request, response: Response): void {
   try {
     if (typeof caches === "undefined" || !caches.default) return;
     // put() can throw synchronously, which would escape ctx.waitUntil and fail
@@ -298,7 +372,12 @@ function cachePut(ctx, key, response) {
   }
 }
 
-async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
+async function verifiedFetch(
+  commit: string,
+  repoPath: string,
+  expectedDigest: string,
+  ctx: ExecutionContext,
+): Promise<Uint8Array | null> {
   const cacheKey = new Request(`https://pin.resq.internal/${commit}/${repoPath}`);
 
   const cached = await cacheMatch(cacheKey);
@@ -313,7 +392,7 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
   // this function let anything unexpected propagate, which surfaced as an
   // opaque 500 with no way to tell a network problem from a bad digest. Every
   // stage now fails closed to null, which the caller turns into a 502.
-  let bytes;
+  let bytes: Uint8Array | null;
   try {
     const upstream = await fetch(
       `https://raw.githubusercontent.com/${REPO}/${commit}/${repoPath}`,
@@ -325,6 +404,9 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
         // Node accepts it, so local tests passed while production 500'd. A
         // redirect from a pinned commit URL would itself be suspicious, so it
         // is treated as a failure explicitly below.
+        //
+        // TypeScript will not stop anyone repeating this: "error" is a valid
+        // RequestRedirect in the standard lib types. Only workerd objects.
         redirect: "manual",
       },
     );
@@ -345,7 +427,12 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
     }
   } catch (err) {
     console.error(
-      JSON.stringify({ event: "upstream_fetch_threw", commit, path: repoPath, message: String(err && err.message) }),
+      JSON.stringify({
+        event: "upstream_fetch_threw",
+        commit,
+        path: repoPath,
+        message: String(err instanceof Error ? err.message : err),
+      }),
     );
     return null;
   }
@@ -355,14 +442,14 @@ async function verifiedFetch(commit, repoPath, expectedDigest, ctx) {
   cachePut(
     ctx,
     cacheKey,
-    new Response(bytes, { headers: { "cache-control": "public, max-age=86400" } }),
+    new Response(bytes as BodyInit, { headers: { "cache-control": "public, max-age=86400" } }),
   );
   return bytes;
 }
 
 // ── Generated documents ─────────────────────────────────────────────────────
 
-function sha256sums(release) {
+function sha256sums(release: Release): string {
   return (
     Object.entries(release.artifacts)
       .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -371,7 +458,7 @@ function sha256sums(release) {
   );
 }
 
-function manifest(config, version, release) {
+function manifest(config: PinConfig, version: string, release: Release): string {
   return (
     JSON.stringify(
       {
@@ -397,7 +484,7 @@ function manifest(config, version, release) {
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Any exception escaping here becomes a runtime 500 whose body is
     // Cloudflare's HTML error page — which is exactly what someone's `curl | sh`
     // would then execute. Every deliberate failure path in this file returns an
@@ -407,93 +494,99 @@ export default {
       return await handle(request, env, ctx);
     } catch (err) {
       console.error(
-        JSON.stringify({ event: "unhandled_error", message: String(err && err.message) }),
+        JSON.stringify({
+          event: "unhandled_error",
+          message: String(err instanceof Error ? err.message : err),
+        }),
       );
       const asShell = !request.url.endsWith(".ps1") && !request.url.endsWith(".json");
       return errorResponse(500, "internal error - refusing to serve", asShell);
     }
   },
-};
+} satisfies ExportedHandler<Env>;
 
-async function handle(request, env, ctx) {
-  {
-    const url = new URL(request.url);
-    const isShellPath = !url.pathname.endsWith(".ps1") && !url.pathname.endsWith(".json");
+async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  const isShellPath = !url.pathname.endsWith(".ps1") && !url.pathname.endsWith(".json");
 
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      const res = errorResponse(405, "method not allowed", false);
-      res.headers.set("allow", "GET, HEAD");
-      return res;
-    }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const res = errorResponse(405, "method not allowed", false);
+    res.headers.set("allow", "GET, HEAD");
+    return res;
+  }
 
-    const target = route(url.pathname);
-    if (!target) return errorResponse(404, "not found", isShellPath);
+  const target = route(url.pathname);
+  if (!target) return errorResponse(404, "not found", isShellPath);
 
-    const config = pins(env);
-    const version = target.version ?? config.latest;
-    const release = Object.prototype.hasOwnProperty.call(config.releases, version)
-      ? config.releases[version]
-      : null;
-    if (!release) return errorResponse(404, "unknown version", isShellPath);
+  const config = pins(env);
+  const version = target.version ?? config.latest;
+  const release = Object.prototype.hasOwnProperty.call(config.releases, version)
+    ? config.releases[version]
+    : undefined;
+  if (!release) return errorResponse(404, "unknown version", isShellPath);
 
-    // Generated documents: derived from the pins, nothing to fetch or verify.
-    if (target.name === "SHA256SUMS" || target.name === "manifest.json") {
-      const isJson = target.name === "manifest.json";
-      const body = isJson ? manifest(config, version, release) : sha256sums(release);
-      return new Response(request.method === "HEAD" ? null : body, {
-        headers: {
-          ...baseHeaders(),
-          "content-type": isJson ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
-          "cache-control": target.version
-            ? "public, max-age=31536000, immutable"
-            : "public, max-age=300",
-          "x-resq-version": version,
-          "x-resq-commit": release.commit,
-        },
-      });
-    }
-
-    const meta = ARTIFACTS[target.name];
-    const expected = release.artifacts[meta.path];
-    if (!expected) return errorResponse(404, "artifact not in this release", meta.shell);
-
-    // A matching ETag means the client already holds these exact bytes, and
-    // the ETag *is* the content digest — so this is a safe short-circuit.
-    const etag = `"${expected}"`;
-    if (request.headers.get("if-none-match") === etag) {
-      return new Response(null, { status: 304, headers: { etag, ...baseHeaders() } });
-    }
-
-    const bytes = await verifiedFetch(release.commit, meta.path, expected, ctx);
-    if (bytes === null) {
-      // Deliberately uninformative: the client cannot tell a digest mismatch
-      // from an upstream outage, and does not need to. Either way nothing is
-      // served. Operators get the detail in the log.
-      console.error(
-        JSON.stringify({
-          event: "verification_failed",
-          commit: release.commit,
-          path: meta.path,
-          expected,
-        }),
-      );
-      return errorResponse(502, "could not verify installer - refusing to serve", meta.shell);
-    }
-
-    return new Response(request.method === "HEAD" ? null : bytes, {
+  // Generated documents: derived from the pins, nothing to fetch or verify.
+  if (target.name === "SHA256SUMS" || target.name === "manifest.json") {
+    const isJson = target.name === "manifest.json";
+    const body = isJson ? manifest(config, version, release) : sha256sums(release);
+    return new Response(request.method === "HEAD" ? null : body, {
       headers: {
         ...baseHeaders(),
-        "content-type": meta.type,
-        "content-length": String(bytes.byteLength),
-        etag,
+        "content-type": isJson ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
         "cache-control": target.version
           ? "public, max-age=31536000, immutable"
           : "public, max-age=300",
         "x-resq-version": version,
         "x-resq-commit": release.commit,
-        "x-resq-sha256": expected,
-        "x-resq-source": `github:${REPO}@${release.commit}/${meta.path}`,
       },
     });
   }
+
+  const meta = ARTIFACTS[target.name];
+  // route() only returns names present in ARTIFACTS, so this is unreachable —
+  // but the lookup is typed as possibly-undefined, and a 404 is the honest
+  // answer if that invariant is ever broken by an edit.
+  if (!meta) return errorResponse(404, "not found", isShellPath);
+
+  const expected = release.artifacts[meta.path];
+  if (!expected) return errorResponse(404, "artifact not in this release", meta.shell);
+
+  // A matching ETag means the client already holds these exact bytes, and
+  // the ETag *is* the content digest — so this is a safe short-circuit.
+  const etag = `"${expected}"`;
+  if (request.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: { etag, ...baseHeaders() } });
+  }
+
+  const bytes = await verifiedFetch(release.commit, meta.path, expected, ctx);
+  if (bytes === null) {
+    // Deliberately uninformative: the client cannot tell a digest mismatch
+    // from an upstream outage, and does not need to. Either way nothing is
+    // served. Operators get the detail in the log.
+    console.error(
+      JSON.stringify({
+        event: "verification_failed",
+        commit: release.commit,
+        path: meta.path,
+        expected,
+      }),
+    );
+    return errorResponse(502, "could not verify installer - refusing to serve", meta.shell);
+  }
+
+  return new Response(request.method === "HEAD" ? null : (bytes as BodyInit), {
+    headers: {
+      ...baseHeaders(),
+      "content-type": meta.type,
+      "content-length": String(bytes.byteLength),
+      etag,
+      "cache-control": target.version
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=300",
+      "x-resq-version": version,
+      "x-resq-commit": release.commit,
+      "x-resq-sha256": expected,
+      "x-resq-source": `github:${REPO}@${release.commit}/${meta.path}`,
+    },
+  });
 }

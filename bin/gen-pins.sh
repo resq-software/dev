@@ -20,7 +20,7 @@
 
 set -eu
 
-# Keep in sync with ARTIFACTS in worker/src/index.js. A path listed here but
+# Keep in sync with ARTIFACTS in worker/src/index.ts. A path listed here but
 # absent from a given tag is skipped for that release, so older tags that
 # predate a script simply do not offer it.
 ARTIFACT_PATHS="install.sh install.ps1 scripts/install-hooks.sh scripts/install-hooks.ps1 scripts/install-resq.sh scripts/setup.sh scripts/setup.ps1"
@@ -107,7 +107,7 @@ check_remote() {
 # The block is located structurally rather than by regex-replacing digests, so
 # a malformed or partially-applied edit cannot leave half-old pins behind.
 write_source() {
-  target="worker/src/index.js"
+  target="worker/src/index.ts"
   [ -f "$target" ] || die "$target not found — run from the repository root"
 
   # `|| true` is load-bearing: grep -c exits 1 when the count is zero, the
@@ -133,19 +133,26 @@ write_source() {
     tail -n +"$((end + 1))" "$target"
   } > "$tmp"
 
-  # Never leave the Worker source syntactically broken: if node cannot parse the
+  # Never leave the Worker source syntactically broken: if node cannot load the
   # result, keep the original and fail loudly.
   #
-  # Checked through a .mjs copy deliberately. `node --check` on a suffix-less
-  # temp file assumes CommonJS, where the Worker's `export default` is a syntax
-  # error — so checking $tmp directly rejects every correct regeneration.
+  # Validated by importing a .ts copy, not by `node --check`. Verified: node
+  # --check does not strip types on ANY extension — .mjs, .mts and .ts all
+  # reject `interface`/annotations outright — so the previous check would have
+  # failed every single correct regeneration once the Worker became TypeScript.
+  # Dynamic import does strip types (Node 23.6+) and is the stronger test
+  # anyway: it proves the module parses AND evaluates, where --check only ever
+  # proved it parsed.
+  #
+  # Safe to evaluate: the Worker's top level is pure declarations plus an
+  # `export default`, with no side effects until fetch() is called.
   if command -v node >/dev/null 2>&1; then
-    cp "$tmp" "$tmp.mjs"
-    if ! node --check "$tmp.mjs" 2>/dev/null; then
-      rm -f "$tmp" "$tmp.mjs"
+    cp "$tmp" "$tmp.ts"
+    if ! node --input-type=module -e "await import('file://$tmp.ts')" >/dev/null 2>&1; then
+      rm -f "$tmp" "$tmp.ts"
       die "regenerated $target does not parse — original left untouched"
     fi
-    rm -f "$tmp.mjs"
+    rm -f "$tmp.ts"
   fi
 
   if cmp -s "$tmp" "$target"; then
@@ -168,7 +175,7 @@ gen-pins.sh — pin set for the get.resq.software Worker
   sh bin/gen-pins.sh            compact JSON, single line
   sh bin/gen-pins.sh --pretty   readable JSON
   sh bin/gen-pins.sh --check    assert GitHub serves exactly these pinned bytes
-  sh bin/gen-pins.sh --write    rewrite the PINS block in worker/src/index.js
+  sh bin/gen-pins.sh --write    rewrite the PINS block in worker/src/index.ts
 
 Derived from every v* tag, so any checkout reproduces the same output.
 EOF
