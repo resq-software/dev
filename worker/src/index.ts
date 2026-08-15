@@ -39,6 +39,33 @@
  * Corollary: bumping the installer is a deliberate, reviewable act — edit
  * PINS, deploy. It can no longer happen as a side effect of pushing to main.
  *
+ * ── Where that claim stops being true ──────────────────────────────────────
+ *
+ * The RESQ_PINS variable is a second way in, and it is not review-gated.
+ * Anyone who can set a Worker variable — dashboard access or an API token —
+ * can supply an arbitrary {commit, digest} pair for this repo with no PR, no
+ * diff and no approval. The override brings its own digests, so it is
+ * internally consistent, which is exactly what makes it a complete bypass
+ * rather than a partial one: verification still passes, against attacker-
+ * chosen expectations.
+ *
+ * So the trust anchor is not "the PINS block" alone. It is "the PINS block OR
+ * whoever holds Cloudflare credentials for this Worker". Anyone auditing this
+ * file should treat those credentials as equivalent to commit access on the
+ * installer, and scope them accordingly.
+ *
+ * Nothing sets RESQ_PINS today: there is no `vars` block in wrangler.jsonc and
+ * no workflow that writes one. It survives because the test suite uses it to
+ * inject deliberately-wrong pins and assert this Worker refuses to serve them
+ * — see "digest mismatch -> 502". Its original purpose (letting a release
+ * deploy avoid rewriting source) is obsolete: bin/gen-pins.sh --write now
+ * edits PINS and opens a PR, which is the reviewable path this header claims.
+ *
+ * If that testing use ever finds another home, delete the override and the
+ * claim above becomes unconditional. Removing it is safe by construction —
+ * with no override, pins() returns the inline set, which is what the docs
+ * already promise users are getting.
+ *
  * ── A note on types ────────────────────────────────────────────────────────
  *
  * Types here are a maintainability tool, not a security control, and it is
@@ -54,18 +81,43 @@
  *
  *   curl -fsSL https://get.resq.software | sh
  *
- * Verify by hand at any time:
+ * Verify by hand at any time. SHA256SUMS names artifacts by ROUTE, so the
+ * files curl writes are the names sha256sum -c looks for:
  *
- *   curl -fsSL https://get.resq.software/SHA256SUMS
+ *   curl -fsSLO https://get.resq.software/SHA256SUMS
+ *   curl -fsSLO https://get.resq.software/install.sh
+ *   curl -fsSLO https://get.resq.software/hooks.sh
+ *   sha256sum --ignore-missing -c SHA256SUMS
+ *
+ * Or a single artifact, without the manifest:
+ *
  *   curl -fsSL https://get.resq.software/install.sh | sha256sum
  *   curl -fsSI https://get.resq.software | grep x-resq-sha256
  */
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+// Type-only import from the org's types package (resq-software/npm). `Brand` is
+// `export type`, so with verbatimModuleSyntax this import is erased outright —
+// the Worker keeps shipping zero runtime dependencies and the bundle is
+// unchanged. Its runtime helpers (brandRefiner, unsafeBrand) are deliberately
+// NOT imported; validatePinConfig below does that job without the dependency.
+import type { Brand } from "@resq-systems/types";
+
+/** A 64-char lowercase SHA-256: checked by isRelease, or computed by sha256Hex. */
+export type Sha256Hex = Brand<string, "Sha256Hex">;
+
+/**
+ * A 40-char lowercase git commit SHA. Branded because the distinction that
+ * matters here is not "is a string" but "cannot be a branch or tag name" — a
+ * pin whose commit is `main` is not a pin at all. The brand makes the compiler
+ * track which strings have actually passed that check.
+ */
+export type CommitSha = Brand<string, "CommitSha">;
+
 export interface Release {
-  commit: string;
-  artifacts: Record<string, string>;
+  commit: CommitSha;
+  artifacts: Record<string, Sha256Hex>;
 }
 
 export interface PinConfig {
@@ -158,10 +210,24 @@ const PINS = {
   }
 };
 
-// The type check on the generated block. If gen-pins.sh ever emits something
-// structurally wrong — a missing commit, artifacts as an array — this line
-// fails to compile.
-const DEFAULT_PINS: PinConfig = PINS;
+// The inline pins, as a PinConfig.
+//
+// The cast is unavoidable and deliberate: PINS is generated JSON, so its
+// commit/digest strings are plain `string` and cannot carry the CommitSha and
+// Sha256Hex brands without going through validatePinConfig — which cannot run
+// here, because there is nothing to fall back TO if it fails.
+//
+// So this is checked at CI time instead, by a test that runs the real
+// validatePinConfig over these very pins. That is a deliberate choice over
+// validating at module scope: a throw during module initialisation takes the
+// whole endpoint down, whereas a bad pin caught in CI never deploys at all.
+// Getting this wrong is an availability failure, not an integrity one —
+// verifiedFetch still compares bytes to digests, so a commit of "main" would
+// produce 502s, never wrong bytes.
+// Exported so the CI test can run validatePinConfig over exactly these pins.
+// Safe against gen-pins.sh: it rewrites only from `^const PINS = {` through the
+// closing `^};`, and this line sits after that block.
+export const DEFAULT_PINS = PINS as unknown as PinConfig;
 
 const REPO = "resq-software/dev";
 
@@ -189,6 +255,7 @@ const ARTIFACTS: Record<string, ArtifactMeta> = {
 // Accept the repo basename too, so a URL copied out of the repo still works.
 const ALIASES: Record<string, string> = {
   "install-hooks.sh": "hooks.sh",
+  "install-hooks.ps1": "hooks.ps1",
   "install-resq.sh": "resq.sh",
 };
 
@@ -212,38 +279,45 @@ function isRelease(value: unknown): value is Release {
   );
 }
 
+/**
+ * Validate an entire pin set, returning it typed or null. Exported so the test
+ * suite can run it over the INLINE pins as well as the override — the rules
+ * below were previously enforced only on the untrusted path, which is exactly
+ * backwards from where belt-and-braces belongs.
+ */
+export function validatePinConfig(value: unknown): PinConfig | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { latest, releases } = value as { latest?: unknown; releases?: unknown };
+
+  if (typeof latest !== "string") return null;
+  if (!releases || typeof releases !== "object" || Array.isArray(releases)) return null;
+  // An own-property check, not a bare index: `{"latest":"__proto__"}` would
+  // otherwise reach Object.prototype and satisfy a truthiness test.
+  if (!Object.hasOwn(releases, latest)) return null;
+
+  // EVERY release, not just releases[latest]. Checking only the latest one let a
+  // second release ride along with a commit nothing had verified to be a SHA —
+  // so a half-formed set was accepted, contradicting the "malformed input
+  // degrades to known-good pins" rule stated above PINS.
+  //
+  // Content stayed verified either way: verifiedFetch compares bytes against
+  // that release's digest regardless, so a mutable ref could not smuggle
+  // arbitrary code through. This closes the hole one layer earlier, where the
+  // stated contract says it should close.
+  if (!Object.values(releases).every(isRelease)) return null;
+
+  // Rebuilt from validated fields rather than returned as-is, so unknown keys
+  // are dropped instead of carried along.
+  return { latest, releases } as PinConfig;
+}
+
 function pins(env: Env | undefined): PinConfig {
   if (!env || typeof env.RESQ_PINS !== "string") return DEFAULT_PINS;
   try {
-    // JSON.parse returns `any`, so this is typed `unknown` and narrowed by
-    // checks rather than by assertion. A bare `as PinConfig` would have the
-    // compiler vouch for a shape nothing had actually verified.
-    const parsed = JSON.parse(env.RESQ_PINS) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return DEFAULT_PINS;
-    const { latest, releases } = parsed as { latest?: unknown; releases?: unknown };
-
-    if (typeof latest !== "string") return DEFAULT_PINS;
-    if (!releases || typeof releases !== "object" || Array.isArray(releases)) return DEFAULT_PINS;
-    // An own-property check, not a bare index: `{"latest":"__proto__"}` would
-    // otherwise reach Object.prototype and satisfy a truthiness test.
-    if (!Object.hasOwn(releases, latest)) return DEFAULT_PINS;
-
-    // EVERY release, not just releases[latest]. The previous version checked
-    // only the latest one, so a request for /0.4.0/install.sh could use an
-    // unvalidated commit from the same override — a half-formed override was
-    // accepted, contradicting the "malformed input degrades to known-good pins"
-    // rule stated above PINS. Found in review of this port; the JavaScript it
-    // replaced had the identical gap.
-    //
-    // Content stayed verified either way: verifiedFetch still compares bytes
-    // against that release's digest, so a mutable ref could not have smuggled
-    // arbitrary code through. This closes the hole one layer earlier, where the
-    // stated contract says it should close.
-    if (!Object.values(releases).every(isRelease)) return DEFAULT_PINS;
-
-    // Rebuilt from the validated fields rather than returning `parsed`, so any
-    // extra keys in the override are dropped instead of carried along.
-    return { latest, releases } as PinConfig;
+    // JSON.parse returns `any`, so the value is treated as `unknown` and
+    // narrowed by checks rather than by assertion. A bare `as PinConfig` would
+    // have the compiler vouch for a shape nothing had actually verified.
+    return validatePinConfig(JSON.parse(env.RESQ_PINS)) ?? DEFAULT_PINS;
   } catch {
     return DEFAULT_PINS;
   }
@@ -305,6 +379,40 @@ async function readCapped(response: Response, max: number): Promise<Uint8Array |
 // `curl -fsSL` suppresses error bodies, but people drop -f, and a bare English
 // sentence piped into sh is a command. This makes the failure mode inert.
 // Messages come from a fixed set — no request data is ever reflected.
+// Whether a failure on this route must be answered with inert shell.
+//
+// Takes a PATHNAME, never a full URL. The top-level catch used to test
+// request.url, so `/install.ps1?v=1` ends with "1" rather than ".ps1" and a
+// PowerShell client was handed a `#!/bin/sh` body — and `/install.sh?x=.json`
+// went the other way. Since that catch exists precisely to guarantee nothing
+// HTML-shaped reaches a pipe, it must classify exactly as handle() does; one
+// function now serves both.
+function isShellPathname(pathname: string): boolean {
+  return !pathname.endsWith(".ps1") && !pathname.endsWith(".json");
+}
+
+/**
+ * RFC 9110 If-None-Match: a comma-separated list, entries optionally weak.
+ *
+ * Exact string equality missed `W/"…"` and every multi-entry list, so a client
+ * holding the right bytes was sent them again. It failed safe — a full 200 is
+ * never wrong, only wasteful — but "wasteful on every revalidation" is worth
+ * ten lines. `*` matches anything, per the spec.
+ *
+ * Weak comparison is the correct semantic for If-None-Match, and it is sound
+ * here regardless: our ETag is the content digest, so equal tags mean
+ * byte-identical content by construction.
+ */
+function etagMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const bare = (tag: string) => tag.trim().replace(/^W\//, "");
+  const want = bare(etag);
+  return header.split(",").some((candidate) => {
+    const got = bare(candidate);
+    return got === "*" || got === want;
+  });
+}
+
 function errorBody(message: string, asShell: boolean): string {
   if (!asShell) return `resq: ${message}\n`;
   return `#!/bin/sh\n# resq installer: ${message}\nprintf '%s\\n' 'resq installer: ${message}' >&2\nexit 1\n`;
@@ -415,10 +523,14 @@ async function verifiedFetch(
 
   const cached = await cacheMatch(cacheKey);
   if (cached) {
-    const bytes = new Uint8Array(await cached.arrayBuffer());
+    // Capped on the way out too, matching the upstream path. Only entries this
+    // Worker wrote can be here, so today the cap cannot trigger — but the
+    // asymmetry was the kind that stops being harmless the moment someone adds
+    // a second writer, and a bounded read costs nothing.
+    const bytes = await readCapped(cached, MAX_BYTES);
     // Re-verify on the way out of cache. Cheap, and it means a poisoned or
     // truncated cache entry can never be served.
-    if (digestsEqual(await sha256Hex(bytes), expectedDigest)) return bytes;
+    if (bytes !== null && digestsEqual(await sha256Hex(bytes), expectedDigest)) return bytes;
   }
 
   // Staged so a failure names the stage it happened in. The first version of
@@ -482,10 +594,33 @@ async function verifiedFetch(
 
 // ── Generated documents ─────────────────────────────────────────────────────
 
+// Repo path -> public route, derived from ARTIFACTS so it cannot drift from it.
+const ROUTE_BY_PATH: Record<string, string> = Object.fromEntries(
+  Object.entries(ARTIFACTS).map(([route, meta]) => [meta.path, route]),
+);
+
+/**
+ * The digest manifest, in `sha256sum -c` format.
+ *
+ * Names are ROUTES, not repo paths. This used to emit repo paths, which made
+ * the documented recipe a lie for most artifacts: you fetch `/hooks.sh`, so
+ * `curl -O` writes `hooks.sh`, but the manifest said
+ * `scripts/install-hooks.sh` and `sha256sum -c` failed on the filename. It
+ * happened to work for install.sh and install.ps1 only because their route and
+ * repo path coincide — which is precisely why the bug survived the header
+ * example.
+ *
+ * The repo path for each artifact is still published, in manifest.json, where
+ * it is informational rather than load-bearing.
+ */
 function sha256sums(release: Release): string {
   const lines = Object.entries(release.artifacts)
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([path, digest]) => `${digest}  ${path}`)
+    .map(([path, digest]) => [ROUTE_BY_PATH[path] ?? path, digest] as const)
+    // A total comparator. The old `a < b ? -1 : 1` never returns 0, so it is
+    // unstable by construction; object keys cannot collide today, but a
+    // comparator that lies about equality is a trap for whoever edits next.
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, digest]) => `${digest}  ${name}`)
     .join("\n");
   // Trailing newline matters: `sha256sum -c` expects every record to end with
   // one, and a file without it fails to parse the final line on some coreutils.
@@ -518,6 +653,18 @@ function manifest(config: PinConfig, version: string, release: Release): string 
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Classify BEFORE the try. Deciding this inside the catch would mean the
+    // recovery path depends on work that can itself fail — and URL parsing is
+    // the one step here that can throw on a malformed request. If it does, the
+    // shell default is the safe answer: an inert `#!/bin/sh` body is harmless
+    // to a PowerShell reader, whereas HTML reaching `curl | sh` is not.
+    let asShell = true;
+    try {
+      asShell = isShellPathname(new URL(request.url).pathname);
+    } catch {
+      /* keep the shell default */
+    }
+
     // Any exception escaping here becomes a runtime 500 whose body is
     // Cloudflare's HTML error page — which is exactly what someone's `curl | sh`
     // would then execute. Every deliberate failure path in this file returns an
@@ -532,7 +679,6 @@ export default {
           message: String(err instanceof Error ? err.message : err),
         }),
       );
-      const asShell = !request.url.endsWith(".ps1") && !request.url.endsWith(".json");
       return errorResponse(500, "internal error - refusing to serve", asShell);
     }
   },
@@ -540,10 +686,13 @@ export default {
 
 async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  const isShellPath = !url.pathname.endsWith(".ps1") && !url.pathname.endsWith(".json");
+  const isShellPath = isShellPathname(url.pathname);
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    const res = errorResponse(405, "method not allowed", false);
+    // isShellPath, not a hardcoded false. `curl -X POST .../install.sh | sh` is
+    // a real thing to type by accident, and the rule that error bodies on shell
+    // routes are themselves inert shell has no reason to exempt 405.
+    const res = errorResponse(405, "method not allowed", isShellPath);
     res.headers.set("allow", "GET, HEAD");
     return res;
   }
@@ -585,8 +734,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // A matching ETag means the client already holds these exact bytes, and
   // the ETag *is* the content digest — so this is a safe short-circuit.
   const etag = `"${expected}"`;
-  if (request.headers.get("if-none-match") === etag) {
-    return new Response(null, { status: 304, headers: { etag, ...baseHeaders() } });
+  const cacheControl = target.version
+    ? "public, max-age=31536000, immutable"
+    : "public, max-age=300";
+  if (etagMatches(request.headers.get("if-none-match"), etag)) {
+    // cache-control belongs on the 304 too. Without it a revalidating
+    // intermediary learns the response is still fresh but not for how long,
+    // and throws away the freshness window the 200 would have granted.
+    return new Response(null, {
+      status: 304,
+      headers: { ...baseHeaders(), etag, "cache-control": cacheControl },
+    });
   }
 
   const bytes = await verifiedFetch(release.commit, meta.path, expected, ctx);
@@ -605,15 +763,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return errorResponse(502, "could not verify installer - refusing to serve", meta.shell);
   }
 
-  return new Response(request.method === "HEAD" ? null : (bytes as BodyInit), {
+  const isHead = request.method === "HEAD";
+  return new Response(isHead ? null : (bytes as BodyInit), {
     headers: {
       ...baseHeaders(),
       "content-type": meta.type,
-      "content-length": String(bytes.byteLength),
+      // Sent on HEAD only, where there is no body and the size is the whole
+      // point of asking. On GET the runtime owns transfer framing, and stating
+      // a length it may then re-encode (compression) is a claim we cannot keep.
+      ...(isHead ? { "content-length": String(bytes.byteLength) } : {}),
       etag,
-      "cache-control": target.version
-        ? "public, max-age=31536000, immutable"
-        : "public, max-age=300",
+      "cache-control": cacheControl,
       "x-resq-version": version,
       "x-resq-commit": release.commit,
       "x-resq-sha256": expected,

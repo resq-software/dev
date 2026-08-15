@@ -37,6 +37,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
     "@cloudflare/workers-types": "5.20260815.1",
+    "@resq-systems/types": "0.2.0",
     "typescript": "7.0.2",
     "wrangler": "4.123.0"
   }
