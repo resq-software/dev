@@ -41,7 +41,7 @@ $Org            = 'resq-software'
 $NixInstallUrl  = 'https://install.determinate.systems/nix/tag/v3.21.9'
 $NixInstallerSha256 = 'ed6067b13423cfd36c50e5b156b9e08eb3a7bea4dde8cb1c8d997d757b37b7f6'
 
-# Pinned, hash-verified distribution endpoint (see worker/src/index.js). It
+# Pinned, hash-verified distribution endpoint (see worker/src/index.ts). It
 # serves one specific commit and refuses to serve anything whose SHA-256 does
 # not match, which is why it beats raw.githubusercontent.com's mutable /main.
 $DistBase       = 'https://get.resq.software'

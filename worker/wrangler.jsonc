@@ -4,14 +4,18 @@
   //   npx wrangler dev      # local, hits the real pinned upstream
   //   npx wrangler deploy   # ship it
   //
-  // The pin set lives in src/index.js (PINS). A release deploy can override it
+  // The pin set lives in src/index.ts (PINS). A release deploy can override it
   // without touching source by setting the RESQ_PINS var to the same JSON
   // shape — see the comment above PINS.
+  //
+  // Wrangler transpiles and bundles the TypeScript entrypoint itself; there is
+  // no checked-in build output and no separate compile step. `tsc` is only a
+  // type checker here (noEmit).
   // MUST match the existing Worker in the dashboard. A different name here
   // creates a second Worker beside the live one instead of updating it, and
   // get.resq.software would go on serving the old script.
   "name": "get-resq-software",
-  "main": "src/index.js",
+  "main": "src/index.ts",
 
   // Matches what the live Worker already runs, so adopting this config is not
   // also a silent runtime upgrade. Bump it deliberately, on its own.

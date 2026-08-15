@@ -218,7 +218,7 @@ jobs:
           cd "$tmp/r"
           # gen-pins needs at least one v* tag before it reaches write_source.
           git tag -f v0.0.1 HEAD >/dev/null 2>&1
-          printf 'not a worker\n' > worker/src/index.js
+          printf 'not a worker\n' > worker/src/index.ts
 
           # Assert the exit status too, not only the message. The guard exists
           # to *stop* the run; a script that printed this text and exited 0
@@ -233,7 +233,7 @@ jobs:
           # Match the whole diagnostic rather than a fragment, so a message that
           # drifts into meaning something else cannot keep passing.
           case "$out" in
-            *"expected exactly one 'const PINS = {' in worker/src/index.js, found 0"*)
+            *"expected exactly one 'const PINS = {' in worker/src/index.ts, found 0"*)
               echo "ok — guard failed with: $out" ;;
             *)
               echo "::error::gen-pins.sh failed, but not with the missing-PINS diagnostic"
@@ -279,7 +279,27 @@ jobs:
         with:
           # None of these jobs push; matches every other workflow in the repo.
           persist-credentials: false
-      # Also validates the inline PINS fallback in worker/src/index.js: with no
+      # Node is pinned rather than inherited. The suite and worker-live import
+      # worker/src/index.ts directly and rely on native type stripping, which
+      # only exists from Node 23.6 — on an older default runner image the
+      # import fails outright. Leaving that to whatever the image ships is the
+      # kind of unstated assumption this repo pins everything else against.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install worker devDependencies
+        working-directory: worker
+        run: npm ci --no-audit --no-fund
+
+      # Type checking is a separate gate from the tests: tsc proves the source
+      # is internally consistent, the suite proves it behaves. Neither subsumes
+      # the other — both of this Worker's production outages typechecked fine.
+      - name: Typecheck
+        working-directory: worker
+        run: npm run typecheck
+
+      # Also validates the inline PINS fallback in worker/src/index.ts: with no
       # RESQ_PINS override the suite exercises those pins against live GitHub,
       # so digests that have rotted surface here as a 502 rather than in
       # production, where the Worker would correctly refuse to serve anything.

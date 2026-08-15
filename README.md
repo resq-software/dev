@@ -22,7 +22,7 @@ SHA-256 verifies every byte before sending it; on mismatch it returns 502 with a
 shell snippet that exits non-zero, never installer bytes.
 
 Merging to `main` does not by itself change what you get here. What you receive
-is decided by the pinned digests in `worker/src/index.js`, so it changes only
+is decided by the pinned digests in `worker/src/index.ts`, so it changes only
 when a reviewed pin bump merges and deploys. Cutting a release does not move
 this endpoint either: the release publishes the artifacts, and a separate
 reviewed pull request repoints the pins at them.

@@ -57,6 +57,14 @@ jobs:
           # Read-only job; matches every other workflow in this repo.
           persist-credentials: false
 
+      # Pinned because the step below imports worker/src/index.ts and depends on
+      # native type stripping (Node 23.6+). This monitor is what caught both
+      # production outages, so it must not be the thing that silently stops
+      # working when the runner image changes underneath it.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
       - name: Compare the live endpoint against this commit
         run: |
           set -euo pipefail
@@ -67,7 +75,7 @@ jobs:
           // beats parsing the PINS block out of the source: the module itself
           // decides, so the check cannot drift from the implementation.
           globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
-          const worker = (await import("./worker/src/index.js")).default;
+          const worker = (await import("./worker/src/index.ts")).default;
           const ctx = { waitUntil: (p) => p.catch(() => {}) };
           const localRes = await worker.fetch(new Request(`${ORIGIN}/manifest.json`), {}, ctx);
           const local = JSON.parse(await localRes.text());

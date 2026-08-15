@@ -1,0 +1,37 @@
+{
+  // Type checking only. Wrangler (esbuild) does the actual transpile and
+  // bundle for deploys, and Node 23+ strips types directly when the test
+  // runner and worker-live import src/index.ts — so nothing in this repo ever
+  // consumes tsc output. noEmit keeps it that way: one build path, not two.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+
+    // workerd globals: Request/Response/caches/ExecutionContext/fetch.
+    "types": ["@cloudflare/workers-types"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  // worker-configuration.d.ts is deliberately absent. `wrangler types` emits it
+  // to describe binding types, but this Worker has no bindings — Env is one
+  // optional var, declared by hand in src/index.ts. Verified: typecheck and
+  // `wrangler deploy --dry-run` both pass without it. Committing 555 KB of
+  // generated declarations to describe nothing would be pure noise in a repo
+  // whose worth is that a person can read all of it. Run `npm run types` if
+  // bindings are ever added, and include the file then.
+  "include": ["src/**/*.ts"]
+}

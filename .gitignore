@@ -1,2 +1,16 @@
 .claude/settings.local.json
 docs/
+
+# Worker toolchain. node_modules is devDependencies only — nothing here reaches
+# the deployed bundle. dist/ is the output of `wrangler deploy --dry-run
+# --outdir dist`, which exists to inspect what will ship; committing it would
+# create a second, unreviewed copy of the Worker beside the source.
+worker/node_modules/
+worker/dist/
+worker/.wrangler/
+
+# Output of `wrangler types`. This Worker has no bindings, so the file is 555 KB
+# of declarations describing nothing — verified that typecheck and dry-run both
+# pass without it. If bindings are ever added, un-ignore it, add it back to
+# tsconfig's include, and commit it.
+worker/worker-configuration.d.ts

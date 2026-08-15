@@ -23,8 +23,11 @@ bin/              — Maintainer tools. Deliberately NOT scripts/: everything in
   gen-pins.sh     — Derives the Worker pin set from every v* tag
   stamp.sh        — Propagates VERSION + hook digests into both installers
 worker/           — get.resq.software: pinned, hash-verified distribution
-  src/index.js    — The Worker. PINS decides which bytes users receive.
+  src/index.ts    — The Worker. PINS decides which bytes users receive.
+                    TypeScript; Wrangler transpiles on deploy, tsc only checks.
   wrangler.jsonc  — Deploy manifest; `name` must match the live Worker
+  tsconfig.json   — Type checking only (noEmit); no build output is committed
+  package.json    — devDependencies only; the Worker ships zero runtime deps
   test/           — node worker/test/index.test.mjs
 scripts/
   setup.sh        — Post-clone environment bootstrap (bash)
@@ -77,7 +80,7 @@ primitive by design. The only question that matters is *whose* code, so:
   `-f` still fails loudly instead of executing prose. There is no degraded mode
   that serves unverified content.
 - Therefore **merging to `main` ships nothing.** What users receive is decided
-  by the `PINS` block in `worker/src/index.js`, which changes only via a
+  by the `PINS` block in `worker/src/index.ts`, which changes only via a
   reviewed PR. That is the gate — not the deploy trigger.
 
 Cutting a release:

@@ -15,8 +15,11 @@ globalThis.caches = {
   },
 };
 
+// Imported as .ts directly. Node strips types natively (23.6+), so the tests
+// exercise the same file Wrangler bundles — no build step, and no compiled
+// copy that could drift from the source under review.
 const worker = (
-  await import("../src/index.js")
+  await import("../src/index.ts")
 ).default;
 
 const ctx = { waitUntil: (p) => p.catch(() => {}) };

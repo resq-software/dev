@@ -355,12 +355,12 @@ jobs:
           # the repository was taken, so fetch it before deriving pins.
           git fetch --tags --force origin
           sh bin/gen-pins.sh --write
-          if git diff --quiet -- worker/src/index.js; then
+          if git diff --quiet -- worker/src/index.ts; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "PINS already current; nothing to propose."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git --no-pager diff -- worker/src/index.js
+            git --no-pager diff -- worker/src/index.ts
           fi
 
       - name: Open pull request
@@ -374,7 +374,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add worker/src/index.js
+          git add worker/src/index.ts
           git commit -m "chore(worker): pin get.resq.software to v$VERSION"
 
           # --force-with-lease compares against the remote-tracking ref, which
