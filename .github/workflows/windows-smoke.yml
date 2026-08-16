@@ -51,6 +51,12 @@ jobs:
   load:
     name: load installers (${{ matrix.name }})
     runs-on: windows-latest
+    # Job-level, not per step: the matrix context is NOT available in a step's
+    # `shell:` key (actionlint: "context matrix is not allowed here"), but it is
+    # available in jobs.<id>.defaults. Every run step below inherits this.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +76,6 @@ jobs:
           persist-credentials: false
 
       - name: Report the shell actually under test
-        shell: ${{ matrix.shell }}
         run: $PSVersionTable | Format-List PSVersion, PSEdition | Out-String | Write-Host
 
       # Dot-sourcing runs every top-level statement in the library set: the
@@ -78,7 +83,6 @@ jobs:
       # definition. platform.ps1 reads $IsWindows/$IsLinux/$IsMacOS, so this
       # step alone fails on 5.1 if that read is unguarded.
       - name: Libraries load
-        shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Stop'
           . ./scripts/lib/shell-utils.ps1
@@ -96,7 +100,6 @@ jobs:
       # powershell job in required.yml; exercising it safely needs a container
       # or a stubbed PATH, which is a bigger change than this one.
       - name: install.ps1 loads without running
-        shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Stop'
           $src = Get-Content 'install.ps1'
@@ -122,7 +125,6 @@ jobs:
       # the installer. Run it the way install.ps1 does and assert the caller
       # gets control back.
       - name: install-hooks.ps1 does not terminate its caller
-        shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Continue'
           $repo = Join-Path $env:RUNNER_TEMP 'smoke-repo'
