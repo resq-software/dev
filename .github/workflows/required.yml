@@ -40,12 +40,33 @@ jobs:
           persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      # Errors only for now (repo has pre-existing warning debt); -x follows
-      # `source`/`.` includes; -exec handles filenames with spaces.
+      # -S warning, not -S error. Every "In POSIX sh, X is undefined" check is
+      # SC30xx, and every SC30xx is WARNING severity — so -S error sits exactly
+      # one notch above the only rules that police this repo's hardest
+      # constraint, that install.sh stays POSIX because it is piped to sh.
+      # Verified: a #!/bin/sh file containing `arr=(a b)` and `[[ -n "$1" ]]`
+      # passes -S error and fails -S warning (SC3030, SC3010).
+      #
+      # The same notch swallowed SC2115 (`rm -rf "$dir/"` with an unset var) and
+      # SC2164 (`cd` without `||`) — both live hazards in a script that removes
+      # temp directories from a trap.
+      #
+      # The old comment here claimed "pre-existing warning debt". Measured: the
+      # repo is at ZERO findings across all 17 shell files at this level, so the
+      # debt was already paid and the gate was being held down for nothing.
+      #
+      # -x follows `source`/`.` includes; -exec handles filenames with spaces.
       - name: Lint shell scripts
         run: >-
           find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*'
-          -exec shellcheck -S error -x {} +
+          -exec shellcheck -S warning -x {} +
+
+      # The check above lints each file under the shell its shebang declares.
+      # install.sh is the one file where the dialect is a distribution promise
+      # rather than a preference: it is curl-piped into whatever /bin/sh is, so
+      # it is asserted explicitly rather than left to the shebang being right.
+      - name: install.sh is POSIX sh
+        run: shellcheck -S warning -s sh -x install.sh
 
       # Catch drift on the PR that causes it rather than at tag time. VERSION is
       # the only authored copy of the version; SCRIPT_VERSION, $ScriptVersion
@@ -311,12 +332,72 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tok, [ref]$perr) | Out-Null
             if ($perr) { $fail = $true; Write-Host "PARSE ERROR: $($f.FullName)"; $perr | ForEach-Object { Write-Host "  $($_.Message)" } }
           }
-          # PSScriptAnalyzer findings are advisory until the repo's existing debt is burned down.
+          # PSScriptAnalyzer findings are advisory while the real debt is measured.
+          #
+          # This step used to pass `-Path $ps1.FullName`, where $ps1 is an ARRAY of
+          # FileInfo — so .FullName is String[] and -Path, which takes a single
+          # string, threw:
+          #
+          #   Cannot convert 'System.Object[]' to the type 'System.String'
+          #   required by parameter 'Path'
+          #
+          # The catch swallowed it, printed "skipped", and the job went green. The
+          # analyser had never examined a single line while the step name promised
+          # it had. Analysing per file removes the array entirely.
+          #
+          # The catch is kept for a genuinely absent module (offline runner), but it
+          # now names the stage that failed, so "not installed" can never again read
+          # the same as "found nothing".
+          # Availability and findings are tracked as SEPARATE facts, because
+          # conflating them is the defect this step is fixing. "No findings" may
+          # only be printed when every file was actually analysed; otherwise a
+          # broken analyser reads exactly like clean code.
+          #
+          # Import explicitly rather than trusting Get-Module -ListAvailable:
+          # that tests discoverability, not importability, and a module can sit
+          # on disk yet fail to load.
+          $analyzerReady = $false
           try {
             Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-            $issues = Invoke-ScriptAnalyzer -Path $ps1.FullName -Severity Error,Warning -ErrorAction Continue
-            if ($issues) { Write-Host '::group::PSScriptAnalyzer (advisory)'; ($issues | Format-Table -AutoSize | Out-String) | Write-Host; Write-Host '::endgroup::' }
-          } catch { Write-Host "PSScriptAnalyzer skipped: $($_.Exception.Message)" }
+            Import-Module PSScriptAnalyzer -Force -ErrorAction Stop
+            $analyzerReady = $true
+          } catch {
+            Write-Host "::warning::PSScriptAnalyzer unavailable, PowerShell was NOT analysed: $($_.Exception.Message)"
+          }
+          if ($analyzerReady) {
+            $issues = @()
+            $analyzed = 0
+            $failed = @()
+            foreach ($f in $ps1) {
+              try {
+                # -ErrorAction Stop, not Continue. With Continue, a per-file
+                # failure leaves $issues untouched and that file is silently
+                # counted as clean — the same "absence reads as success" shape
+                # this step exists to remove.
+                $issues += Invoke-ScriptAnalyzer -Path $f.FullName -Severity Error,Warning -ErrorAction Stop
+                $analyzed++
+              } catch {
+                $failed += $f.FullName
+                Write-Host "::warning::PSScriptAnalyzer failed on $($f.FullName): $($_.Exception.Message)"
+              }
+            }
+            if ($issues) {
+              Write-Host '::group::PSScriptAnalyzer (advisory)'
+              ($issues | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize | Out-String -Width 200) | Write-Host
+              Write-Host '::endgroup::'
+              # A count, so the debt is a number someone can watch shrink rather than
+              # a wall of text nobody reads.
+              $bySeverity = $issues | Group-Object Severity | ForEach-Object { "$($_.Name)=$($_.Count)" }
+              Write-Host "::notice::PSScriptAnalyzer: $($issues.Count) findings across $analyzed/$($ps1.Count) files ($($bySeverity -join ', '))"
+            } elseif ($failed.Count -gt 0) {
+              # Empty findings AND failed files is the false zero. Never report
+              # it as clean: an analyser that could not read a file has said
+              # nothing about that file, which is not the same as approving it.
+              Write-Host "::warning::PSScriptAnalyzer produced no findings, but $($failed.Count) of $($ps1.Count) file(s) could not be analysed — this is NOT a clean result"
+            } else {
+              Write-Host "PSScriptAnalyzer: no Error/Warning findings across all $analyzed file(s)"
+            }
+          }
           if ($fail) { throw 'PowerShell parse errors found' }
 
   worker:
