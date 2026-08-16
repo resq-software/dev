@@ -141,15 +141,26 @@ Write-Host "      Bypass once:        git commit --no-verify"
 Write-Host "      Disable all hooks:  `$env:GIT_HOOKS_SKIP = '1'"
 Write-Host "      Add repo logic:     $hooksDir/local-<hook-name>"
 
+# `return`, not `exit`. install.ps1 runs this file as a ScriptBlock
+# ([ScriptBlock]::Create over its contents), and `exit` is not scoped to a
+# script block — it terminates the ENCLOSING script, and under `irm ... | iex`
+# it terminates the caller's session outright.
+#
+# This branch is the DEFAULT on a fresh machine: install.ps1 installs the resq
+# binary *after* running the hook installer, so $resqBin is null on every first
+# install. The common path therefore truncated the installer here — no resq
+# CLI, no completions, no "Ready!" banner, no next steps — and exited 0.
 if (-not $resqBin) {
     Write-Host "warn  resq backend not found. Hooks will soft-skip until you install it:" -ForegroundColor Yellow
     Write-Host "      irm https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-resq.sh | sh"
     Write-Host "      (or) cargo install --git https://github.com/resq-software/crates resq-cli"
-    exit 0
+    return
 }
 
 # ── Local-hook scaffold prompt ──────────────────────────────────────────────
-if ((Test-Path (Join-Path $hooksDir 'local-pre-push')) -or $env:RESQ_SKIP_LOCAL_SCAFFOLD) { exit 0 }
+# return, not exit — same reason as above: this file runs as a ScriptBlock
+# inside install.ps1, and exit would end the installer rather than this script.
+if ((Test-Path (Join-Path $hooksDir 'local-pre-push')) -or $env:RESQ_SKIP_LOCAL_SCAFFOLD) { return }
 
 # Probe for subcommand support; prefer the new path.
 & $resqBin hooks scaffold-local --help *> $null

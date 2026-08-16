@@ -48,7 +48,7 @@ $DistBase       = 'https://get.resq.software'
 
 # GENERATED — SHA-256 of scripts/install-hooks.ps1 at this version, checked
 # before that file is ever executed. Stamped by bin/stamp.sh.
-$HooksSha256    = 'f061d4155ddc82b3ea9454595e0d83708676569f1cda18b54b15ff5a38602f3e'
+$HooksSha256    = '919de5761b281de5aef48a9ed26be8680f57bd407ef8b62590c2f95017d50f64'
 
 # Canonical repo table — one source of truth for the menu, validation and the
 # post-install summary. Those used to be three separate lists that could
@@ -77,6 +77,26 @@ $Repos = @(
 $ValidRepos = $Repos.Name
 
 # ── Platform flag ────────────────────────────────────────────────────────────
+
+# $IsWindows/$IsLinux/$IsMacOS are PowerShell 6+ automatic variables. They do
+# not exist in Windows PowerShell 5.1, and `Set-StrictMode -Version Latest`
+# above turns a read of an unset variable into a terminating error — so on 5.1
+# this line aborted the installer before it printed anything at all.
+#
+# 5.1 is not an edge case here. `#Requires -Version 5.1` at the top of this file
+# admits it, and it is exactly what `irm ... | iex` runs on a stock Windows box
+# with no pwsh installed. The OSVersion.Platform fallback below shows 5.1 was
+# meant to work; StrictMode made that branch unreachable.
+#
+# Defining them when absent, rather than guarding all twelve downstream reads:
+# Windows PowerShell only ever runs on Windows, so the values are not in doubt,
+# and every `if ($IsLinux)` further down keeps working untouched. The
+# assignment is guarded because these are read-only in 6+.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $IsWindows = $true
+    $IsLinux   = $false
+    $IsMacOS   = $false
+}
 
 $IsNativeWindows = $IsWindows -or (-not $IsLinux -and -not $IsMacOS -and
     [System.Environment]::OSVersion.Platform -eq 'Win32NT')
