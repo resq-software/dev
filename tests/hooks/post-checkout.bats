@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Lock-file change notices and local dispatch for post-checkout/post-merge.
 
 load helpers

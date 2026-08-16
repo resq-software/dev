@@ -1,3 +1,5 @@
+// Copyright 2026 ResQ Systems, Inc.
+// SPDX-License-Identifier: Apache-2.0
 // Smoke test for the get.resq.software Worker. Runs against the real
 // raw.githubusercontent.com upstream, so a pass here means the pinned digests
 // are genuinely correct, not just internally consistent.

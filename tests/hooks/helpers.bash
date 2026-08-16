@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=bash
 # Common helpers for bats tests over the canonical ResQ git hooks.
 #
