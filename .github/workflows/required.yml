@@ -40,12 +40,33 @@ jobs:
           persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      # Errors only for now (repo has pre-existing warning debt); -x follows
-      # `source`/`.` includes; -exec handles filenames with spaces.
+      # -S warning, not -S error. Every "In POSIX sh, X is undefined" check is
+      # SC30xx, and every SC30xx is WARNING severity — so -S error sits exactly
+      # one notch above the only rules that police this repo's hardest
+      # constraint, that install.sh stays POSIX because it is piped to sh.
+      # Verified: a #!/bin/sh file containing `arr=(a b)` and `[[ -n "$1" ]]`
+      # passes -S error and fails -S warning (SC3030, SC3010).
+      #
+      # The same notch swallowed SC2115 (`rm -rf "$dir/"` with an unset var) and
+      # SC2164 (`cd` without `||`) — both live hazards in a script that removes
+      # temp directories from a trap.
+      #
+      # The old comment here claimed "pre-existing warning debt". Measured: the
+      # repo is at ZERO findings across all 17 shell files at this level, so the
+      # debt was already paid and the gate was being held down for nothing.
+      #
+      # -x follows `source`/`.` includes; -exec handles filenames with spaces.
       - name: Lint shell scripts
         run: >-
           find . -type f -name '*.sh' -not -path './node_modules/*' -not -path './.git/*'
-          -exec shellcheck -S error -x {} +
+          -exec shellcheck -S warning -x {} +
+
+      # The check above lints each file under the shell its shebang declares.
+      # install.sh is the one file where the dialect is a distribution promise
+      # rather than a preference: it is curl-piped into whatever /bin/sh is, so
+      # it is asserted explicitly rather than left to the shebang being right.
+      - name: install.sh is POSIX sh
+        run: shellcheck -S warning -s sh -x install.sh
 
       # Catch drift on the PR that causes it rather than at tag time. VERSION is
       # the only authored copy of the version; SCRIPT_VERSION, $ScriptVersion
