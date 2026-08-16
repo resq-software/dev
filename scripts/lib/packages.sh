@@ -35,7 +35,13 @@ install_package() {
     # but this is a library function whose argument lands on a sudo command
     # line, and the cost of being wrong about "nobody will ever pass input
     # here" is arbitrary execution as root.
-    if [[ ! "$package" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+    # The FIRST character must be alphanumeric. An earlier version of this
+    # pattern allowed a leading dash, which quoting does not save you from:
+    # `sudo apt-get install -y -- -something` is safe, but
+    # `sudo apt-get install -y "--option=x"` is one argument that the package
+    # manager parses as an OPTION, in a privileged command. That is argument
+    # injection, not a naming nitpick.
+    if [[ ! "$package" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
         log_error "Refusing to install '$package': not a valid package name."
         return 1
     fi

@@ -36,7 +36,13 @@ check() {
 with_stubs() {
     _stubs="$1"
     _snippet="$2"
-    _t="$(mktemp -d)"
+    # Bail if mktemp fails. Without this, _t is empty, "$_t/bin" becomes /bin,
+    # and the loop below writes stub `apt-get` and `sudo` into the real /bin —
+    # destroying system binaries if the suite is ever run as root.
+    if ! _t="$(mktemp -d)" || [ -z "$_t" ]; then
+        printf 'FATAL: could not create a sandbox directory\n' >&2
+        exit 1
+    fi
     mkdir -p "$_t/bin"
     for _s in $_stubs; do
         printf '#!/bin/sh\nexit 0\n' > "$_t/bin/$_s"
@@ -98,12 +104,25 @@ check "rejects a package name containing a command" "$([ "$r" = 1 ] && echo 0 ||
 r="$(with_stubs "apt-get sudo" 'install_package "osv-scanner" >/dev/null 2>&1; echo $?')"
 check "accepts a normal package name" "$([ "$r" = 0 ] && echo 0 || echo 1)" "exit '$r'"
 
-r="$(with_stubs "" 'install_package "osv-scanner" 2>&1 | grep -c "No supported package manager" || true')"
+r="$(with_stubs "" 'install_package "osv-scanner" 2>&1 | grep -c "No supported package manager"')"
 check "names the missing-package-manager case" "$([ "${r:-0}" -ge 1 ] 2>/dev/null && echo 0 || echo 1)" "matches '$r'"
 
+# Argument injection: a leading dash makes the package manager read the value
+# as an OPTION, in a command run under sudo. Quoting does not prevent that.
+r="$(with_stubs "apt-get sudo" 'install_package "--option=x" >/dev/null 2>&1; echo $?')"
+check "rejects a package name starting with a dash" "$([ "$r" = 1 ] && echo 0 || echo 1)" "exit '$r'"
+
+r="$(with_stubs "apt-get sudo" 'install_package "-rf" >/dev/null 2>&1; echo $?')"
+check "rejects a bare option as a package name" "$([ "$r" = 1 ] && echo 0 || echo 1)" "exit '$r'"
+
 # The one that hangs a CI job rather than failing it.
-r="$(grep -c 'sudo -n' "$ROOT/scripts/lib/packages.sh" || true)"
-check "unattended path uses sudo -n" "$([ "${r:-0}" -ge 1 ] && echo 0 || echo 1)" "occurrences: $r"
+#
+# Asserted on the ASSIGNMENT, not on the string appearing anywhere in the file.
+# The first version grepped for 'sudo -n' and matched its own explanatory
+# comment, so it would have passed unchanged after a revert to interactive
+# sudo — a test that could not fail.
+r="$(grep -cE '^[[:space:]]*sudo_cmd="sudo -n"' "$ROOT/scripts/lib/packages.sh")"
+check "unattended path assigns sudo -n" "$([ "${r:-0}" -ge 1 ] && echo 0 || echo 1)" "assignments: $r"
 
 printf '\n%s passed, %s failed\n\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
