@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2026 ResQ Software
+# Copyright 2026 ResQ Systems, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Propagate the single authored version, plus the hook-installer digests, into

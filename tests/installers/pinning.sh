@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2026 ResQ Software
+# Copyright 2026 ResQ Systems, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Asserts how scripts/install-resq.sh invokes cargo.
