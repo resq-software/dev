@@ -65,9 +65,12 @@ run_suite() {
 run_bats() {
     _out="$(bats "$ROOT/tests/hooks/" 2>&1)"
     _rc=$?
-    _plan="$(printf '%s\n' "$_out" | grep -cE '^1\.\.[0-9]+' || true)"
-    _bad="$(printf '%s\n' "$_out" | grep -cE '^not ok' || true)"
-    _n="$(printf '%s\n' "$_out" | grep -cE '^ok ' || true)"
+    # No `|| true`: this script does not set -e, so grep's exit status is
+    # discarded by the assignment anyway and `grep -c` still prints 0. Adding
+    # it would only hide a genuine grep failure.
+    _plan="$(printf '%s\n' "$_out" | grep -cE '^1\.\.[0-9]+')"
+    _bad="$(printf '%s\n' "$_out" | grep -cE '^not ok')"
+    _n="$(printf '%s\n' "$_out" | grep -cE '^ok ')"
 
     if [ "$_rc" -eq 0 ] && [ "$_plan" -ge 1 ] && [ "$_bad" -eq 0 ]; then
         printf '  PASS  %-12s %s tests, 0 failures\n' "hooks" "$_n"
