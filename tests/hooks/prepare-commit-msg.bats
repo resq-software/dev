@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Ticket-prefix injection in the canonical prepare-commit-msg hook.
 
 load helpers

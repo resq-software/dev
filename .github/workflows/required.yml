@@ -112,11 +112,13 @@ jobs:
           # naive two-pass version reported it twice — as missing AND as stale —
           # which contradicts the promise directly below. Stale wins, because it
           # is the more specific and more actionable diagnosis.
-          stale="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
+          stale="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \
+                        -o -name '*.mjs' -o -name '*.bats' -o -name '*.bash' \) \
                      -not -path './worker/node_modules/*' -not -path './.git/*' \
                      -exec grep -lF 'ResQ Software' {} + || true)"
 
-          missing_all="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
+          missing_all="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \
+                        -o -name '*.mjs' -o -name '*.bats' -o -name '*.bash' \) \
                            -not -path './worker/node_modules/*' -not -path './.git/*' \
                            -exec grep -LE 'Copyright [0-9]{4} ResQ Systems, Inc\.' {} + || true)"
 
@@ -146,7 +148,7 @@ jobs:
           fi
 
           [ "$rc" -eq 0 ] || exit 1
-          echo "ok - every .sh/.ps1/.ts file carries the canonical header"
+          echo "ok - every source file carries the canonical header"
 
       # The cargo fallback in install-resq.sh is not a rare path — it is the
       # only one that runs, because crates publishes no resq-cli-v* release for
