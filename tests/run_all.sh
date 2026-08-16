@@ -88,6 +88,9 @@ printf '\nResQ dev test suites\n\n'
 # Installer pinning. Stubs cargo; touches no network and no toolchain.
 run_suite "installers" "sh tests/installers/pinning.sh" '[0-9]+ passed, 0 failed'
 
+# Library units: OS detection and package-manager selection, fully stubbed.
+run_suite "lib" "bash tests/lib/packages.sh" '[0-9]+ passed, 0 failed'
+
 # Canonical git hooks. bats fetches the hook templates once per session.
 if command -v bats >/dev/null 2>&1; then
     run_bats
