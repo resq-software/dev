@@ -85,16 +85,33 @@ jobs:
             | grep -oE "Name = '[^']+'" \
             | sed "s/Name = '//; s/'//" | sort -u > ps1.txt
 
+          # What README.md advertises. Both installers carry a "Keep in sync
+          # with README.md" comment, and nothing enforced it — so the installers
+          # stayed correct while the README quietly fell behind. The `dotnet`
+          # repo was added to both installers and missed in the README table.
+          #
+          # Two tables, deliberately: the linked Repositories table and the
+          # Quick Start table drift independently, as they just did.
+          # shellcheck disable=SC2016  # backticks here are README markdown, not
+          # a command substitution; single quotes are required so sed sees \1.
+          sed -n 's/^| \[`\([a-z0-9-]*\)`\](https:\/\/github\.com\/resq-software\/.*/\1/p' README.md \
+            | sort -u > readme-repos.txt
+          sed -n '/^## 🚀 Quick Start per Repo/,/^## /p' README.md \
+            | sed -n 's/^| \([a-z0-9-]\{2,\}\) *|.*/\1/p' \
+            | sort -u > readme-quickstart.txt
+
           echo "::group::org (public, non-fork, excluding .github)"; cat actual.txt; echo "::endgroup::"
           echo "::group::install.sh";  cat sh.txt;  echo "::endgroup::"
           echo "::group::install.ps1"; cat ps1.txt; echo "::endgroup::"
+          echo "::group::README repositories table"; cat readme-repos.txt; echo "::endgroup::"
+          echo "::group::README quick-start table";  cat readme-quickstart.txt; echo "::endgroup::"
 
           rc=0
 
           # Guard against an extractor silently matching nothing after a
           # refactor: an empty list "agrees" with an empty list, so the job
           # would pass while checking nothing at all.
-          for f in actual.txt sh.txt ps1.txt; do
+          for f in actual.txt sh.txt ps1.txt readme-repos.txt readme-quickstart.txt; do
             if [ ! -s "$f" ]; then
               echo "::error::$f is empty — the extractor in this workflow no longer matches the file it parses"
               rc=1
@@ -117,6 +134,21 @@ jobs:
             echo "A repository going private is the usual cause — see 'landing'."
             rc=1
           fi
+
+          # The README is compared against the INSTALLERS, not against the org.
+          # Both say the same thing when everything is correct, but pointing at
+          # sh.txt names the file to copy from, which is the actionable answer.
+          for pair in "readme-repos.txt:the Repositories table" "readme-quickstart.txt:the Quick Start per Repo table"; do
+            file="${pair%%:*}"
+            label="${pair#*:}"
+            if ! diff -u sh.txt "$file" > /dev/null; then
+              echo "::error::README.md $label disagrees with the installers"
+              echo "  '-' lines are offered by install.sh but missing from README; '+' are the reverse."
+              diff -u sh.txt "$file" || true
+              echo "Fix: update $label in README.md to match the REPOS table in install.sh."
+              rc=1
+            fi
+          done
 
           [ "$rc" -eq 0 ] && echo "ok — installers offer exactly the public non-fork repositories"
           exit "$rc"

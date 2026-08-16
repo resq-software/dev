@@ -83,6 +83,7 @@ REPO=npm YES=1 curl -fsSL https://get.resq.software/v0.4.3/install.sh | sh
 | Repo | What | Languages |
 |---|---|---|
 | [`programs`](https://github.com/resq-software/programs) | Solana on-chain programs | Rust (Anchor) |
+| [`dotnet`](https://github.com/resq-software/dotnet) | Clean/Hexagonal building blocks — the frame, not the domain | C# |
 | [`dotnet-sdk`](https://github.com/resq-software/dotnet-sdk) | .NET client libraries | C# |
 | [`pypi`](https://github.com/resq-software/pypi) | Python packages (MCP + DSA) | Python |
 | [`crates`](https://github.com/resq-software/crates) | Rust workspace (CLI + DSA + `resq` binary) | Rust |
