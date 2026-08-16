@@ -32,7 +32,7 @@ release, so the installer and the digest list cannot describe different
 versions:
 
 ```bash
-REL=https://get.resq.software/v0.4.0
+REL=https://get.resq.software/v0.4.3
 
 curl -fsSL "$REL/SHA256SUMS"
 curl -fsSL "$REL/install.sh" | sha256sum   # must match the install.sh line
@@ -49,7 +49,7 @@ another.
 Pin to an exact release, which never changes:
 
 ```bash
-curl -fsSL https://get.resq.software/v0.4.0/install.sh | sh
+curl -fsSL https://get.resq.software/v0.4.3/install.sh | sh
 ```
 
 What happens, in order:
@@ -73,7 +73,7 @@ For provisioning, prefer a version-pinned URL so a later release cannot change
 what your machines install without you deciding to:
 
 ```bash
-REPO=npm YES=1 curl -fsSL https://get.resq.software/v0.4.0/install.sh | sh
+REPO=npm YES=1 curl -fsSL https://get.resq.software/v0.4.3/install.sh | sh
 ```
 
 ---
@@ -114,7 +114,7 @@ Each script can be run on its own without going through the full onboarding flow
 | `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git --rev <pinned commit>` when no release asset matches — today that fallback is the only path, since no `resq-cli-v*` release exists yet | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
 
 Every one of these is served pinned and hash-verified, and each has a
-version-locked form — `https://get.resq.software/v0.4.0/hooks.sh` and so on.
+version-locked form — `https://get.resq.software/v0.4.3/hooks.sh` and so on.
 `https://get.resq.software/SHA256SUMS` lists the digest of all of them, keyed
 by the route name you fetch, so it works directly with `sha256sum -c`:
 
@@ -172,7 +172,7 @@ list.
 | vcpkg | C++ | `cmake --preset default` |
 | viz | TypeScript / C# | `bun install` · `dotnet restore` |
 | docs | MDX / Mintlify | `mintlify dev` |
-| dev | Shell / PowerShell | `shellcheck install.sh` · `node worker/test/index.test.mjs` |
+| dev | Shell / PowerShell / TypeScript | `shellcheck install.sh` · `cd worker && npm ci && npm test` |
 
 
 ## 🏷 Releasing
@@ -180,7 +180,7 @@ list.
 One authored value, one action:
 
 ```bash
-echo 0.4.1 > VERSION
+echo 0.4.4 > VERSION     # whatever comes next; 0.4.3 is current
 sh bin/stamp.sh          # propagates VERSION + hook digests into both installers
 # open a PR, merge it — that is the release
 ```
@@ -209,6 +209,47 @@ wire, not trusting the Worker's own claim about them.
 `AGENTS.md` has the full reasoning, including why tagging is an output of the
 release rather than its trigger.
 
+## 🔎 What CI actually verifies
+
+Most of this repo is two shell scripts and a Worker. Most of the engineering is
+in refusing to take anything on trust — including its own claims. Every check
+below runs on pull requests.
+
+**The distribution chain**
+
+| check | what would otherwise rot silently |
+|---|---|
+| hook digests re-fetched from the pinned `crates` commit | a stale pin makes every fresh onboard fail a checksum |
+| pinned `crates` commits are ancestors of `master` | a rebased-away or mistyped SHA breaks `cargo install --rev` |
+| `install-resq.sh` pins its cargo fallback | an unpinned build of a moving branch, reached from `curl \| sh` |
+| Nix and Bun installer digests re-checked against the live URLs | upstream changing what we execute |
+| `stamp.sh --check` | a generated version or hook digest left unstamped |
+| `gen-pins` missing-PINS guard is reachable | the guard itself regressing, which has happened |
+
+**The code**
+
+`shellcheck` at *warning* severity, plus an explicit POSIX-dialect check on
+`install.sh` — every "In POSIX sh, X is undefined" rule is warning-severity, so
+gating at error cannot catch a bashism entering the curl-piped installer.
+
+The Worker is TypeScript, typechecked under `strict` with
+`noUncheckedIndexedAccess`, linted by Biome, and covered by a suite that fetches
+from live GitHub — so a rotted digest surfaces as a failing test rather than a
+502 in production. It ships **zero runtime dependencies**.
+
+`windows-smoke` loads the PowerShell installers on a Windows runner under
+**both** Windows PowerShell 5.1 and pwsh 7. Parsing them on Linux, which is all
+that happened before, cannot catch a variable that only exists in PowerShell 6+.
+
+**After deploy**
+
+`worker-live` fetches from the real endpoint and hashes the bytes on the wire
+against what `main` declares — it does not trust the Worker's own headers about
+what it served.
+
+`repo-drift` re-derives the repository list from the GitHub API and fails when
+this README, `install.sh` and `install.ps1` disagree with reality.
+
 ## Contributor guide
 
 Every ResQ repo ships an `AGENTS.md` at the root — the canonical plain-text dev guide. That's where the build/test/lint commands, architecture notes, and standards for that specific repo live. Read it first.
@@ -235,9 +276,15 @@ Everything is pinned via Nix flakes. No "works on my machine" issues.
 Six hook shims live in [`resq-software/crates`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks) — embedded in the `resq` binary *and* served at a stable raw URL. `install-hooks.sh` picks the best path automatically:
 
 1. **`resq` on PATH** → calls `resq hooks install`, which scaffolds the 6 canonical hooks from the templates embedded in the binary. Offline, versioned with the installed `resq`.
-2. **No `resq`** → falls back to `curl` from `resq-software/crates/master/.../templates/git-hooks/`.
+2. **No `resq`** → fetches them over HTTPS from a **pinned commit** in `resq-software/crates`, and verifies each of the six against a digest baked into the installer before any of them is written.
 
-The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so updates roll out via `cargo install --git` (or `install-resq.sh`) without editing every repo.
+That second path used to fetch from `master` — a mutable branch — with no verification at all, which meant six files that git executes on every commit and push came from wherever that branch happened to point. It is now a commit SHA, which cannot be repointed, plus a SHA-256 check that **fails closed**: on any mismatch nothing is installed. Files are staged in a temp directory and published only once all six verify, so an interrupted or tampered fetch cannot leave a repo with half a hook set.
+
+`RESQ_CRATES_REF` still exists for testing an unreleased hook change, but a pinned digest cannot describe an arbitrary ref, so using it requires `RESQ_ALLOW_UNVERIFIED=1` and says so.
+
+`required.yml` re-fetches all six from the pinned commit on every pull request and fails if the digests in either installer disagree — so a stale pin is a red check rather than a broken onboard.
+
+The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so updates roll out via `install-resq.sh` without editing every repo. That installer prefers a digest-verified release asset and otherwise builds from a pinned commit (`cargo install --git --rev`); an unpinned build of the default branch requires `RESQ_ALLOW_UNVERIFIED=1`.
 
 | Hook | What it gates |
 |---|---|
