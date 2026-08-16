@@ -24,10 +24,34 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# $IsWindows/$IsLinux/$IsMacOS are PowerShell 6+ automatic variables and do not
+# exist in Windows PowerShell 5.1. StrictMode above turns a read of an unset
+# variable into a terminating error, so the chmod branch below (`if ($IsLinux
+# -or $IsMacOS)`) threw on 5.1 and hooks were never configured.
+#
+# Caught by windows-smoke on the run that verified the two OTHER fixes in this
+# same file — the smoke job reported "The variable '$IsLinux' cannot be
+# retrieved" while every step still passed, because the harness was logging the
+# throw instead of failing on it. Both are fixed together.
+#
+# Same guarded block as install.ps1 and scripts/lib/platform.ps1. This file is
+# distributed standalone (curl | sh, and as a ScriptBlock inside install.ps1),
+# so it cannot source the library.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $IsWindows = $true
+    $IsLinux   = $false
+    $IsMacOS   = $false
+}
+
 $targetRoot = & git -C $TargetDir rev-parse --show-toplevel 2>$null
 if (-not $targetRoot) {
     Write-Host "fail  Not a git repository: $TargetDir" -ForegroundColor Red
-    exit 1
+    # throw, not exit. Fourth and last instance in this file: under install.ps1
+    # this runs as a ScriptBlock, where `exit 1` kills the installer outright
+    # and, under `irm | iex`, the caller's session — bypassing install.ps1's own
+    # error handling entirely. A throw is catchable by the caller and matches
+    # this file's existing fatal idiom below.
+    throw 'not a git repository'
 }
 $hooksDir = Join-Path $targetRoot '.git-hooks'
 if (-not (Test-Path $hooksDir)) { New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null }
@@ -168,7 +192,9 @@ if ($LASTEXITCODE -eq 0) {
     $scaffoldArgs = @('hooks', 'scaffold-local')
 } else {
     & $resqBin dev scaffold-local-hook --help *> $null
-    if ($LASTEXITCODE -ne 0) { exit 0 }
+    # return, not exit — third instance of the same hazard in this file. Under
+    # install.ps1 this runs as a ScriptBlock, where exit ends the installer.
+    if ($LASTEXITCODE -ne 0) { return }
     $scaffoldArgs = @('dev', 'scaffold-local-hook')
 }
 
