@@ -128,7 +128,17 @@ else
     # or unverified hook in a directory git is about to execute from.
     umask 077
     _hk_tmp="$(mktemp -d)" || { printf 'fail  Could not create a temporary directory.\n' >&2; exit 1; }
-    trap 'rm -rf "$_hk_tmp"' EXIT HUP INT QUIT TERM
+    # EXIT and the signals get SEPARATE handlers, and the signal one exits.
+    # Same defect install.sh carried: a trap on a non-EXIT signal runs its
+    # handler and then RESUMES — it does not terminate. Here that meant Ctrl-C
+    # during the fetch deleted the staging directory and then carried on into
+    # the publish loop, reading from a directory that no longer existed.
+    #
+    # install.sh was fixed first and this was deliberately deferred to its own
+    # change, because it is a separate pinned artifact whose digest is stamped.
+    # This is that change.
+    trap 'rm -rf "$_hk_tmp"' EXIT
+    trap 'rm -rf "$_hk_tmp"; exit 130' HUP INT QUIT TERM
 
     for h in $HOOKS; do
         if ! curl -fsSL --proto '=https' --tlsv1.2 "$RAW_BASE/$h" -o "$_hk_tmp/$h"; then
