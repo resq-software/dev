@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Package-manager abstraction. Requires log.sh + platform.sh.
 
 get_package_manager() {

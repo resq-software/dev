@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Audit-tool bootstrap (osv-scanner, audit-ci).
 # Requires log.ps1 + platform.ps1 + packages.ps1 + prompt.ps1.
 

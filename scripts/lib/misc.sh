@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Miscellaneous helpers — hashing, GitHub API, port checks.
 # Requires log.sh + platform.sh.
 

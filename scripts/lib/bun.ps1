@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Bun installer. Requires log.ps1 + platform.ps1.
 
 function Install-Bun {

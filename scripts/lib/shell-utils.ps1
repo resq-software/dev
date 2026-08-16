@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Aggregator — dot-sources every lib module in dependency order.
 # Back-compat shim. Prefer dot-sourcing only what you need.
 

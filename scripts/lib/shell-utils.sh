@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Aggregator — sources every lib module in dependency order.
 # Back-compat shim for scripts that source shell-utils.sh directly.
 #
