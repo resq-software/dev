@@ -24,7 +24,15 @@ function Get-PackageManager {
     }
 }
 
-function Install-Package {
+# NOT named Install-Package. That is a real cmdlet shipped with PowerShell
+# (PackageManagement), and these libraries are dot-sourced into the caller's
+# session by shell-utils.ps1 — so defining it here silently replaced the
+# built-in for the remainder of that session, for our code and for anything the
+# user ran afterwards. Same class of hazard as nvm calling `command grep`:
+# never let your own definition shadow the thing callers believe they invoke.
+#
+# Flagged by PSScriptAnalyzer's PSAvoidOverwritingBuiltInCmdlets.
+function Install-SystemPackage {
     param([Parameter(Mandatory)][string]$Package)
     $pm = Get-PackageManager
     switch ($pm) {
@@ -46,6 +54,6 @@ function Install-Package {
 function Install-OsvScanner {
     $pm = Get-PackageManager
     Log-Info "Attempting to install osv-scanner via $pm..."
-    if ($pm -eq 'winget') { return (Install-Package 'Google.OSVScanner') }
-    return (Install-Package 'osv-scanner')
+    if ($pm -eq 'winget') { return (Install-SystemPackage 'Google.OSVScanner') }
+    return (Install-SystemPackage 'osv-scanner')
 }
