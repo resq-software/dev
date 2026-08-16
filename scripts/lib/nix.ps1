@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Nix installer — Windows native is unsupported; warn + WSL hint.
 # Requires log.ps1 + platform.ps1.
 

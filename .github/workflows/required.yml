@@ -76,6 +76,53 @@ jobs:
       - name: Installers stamped from VERSION
         run: sh bin/stamp.sh --check
 
+      # Every source file carries the canonical copyright header.
+      #
+      # In every other ResQ repo this is enforced by `resq copyright`, run from
+      # the pre-commit hook. This repo SHIPS that hook installer and does not
+      # use it — core.hooksPath is unset here, because dev/ deliberately no
+      # longer keeps its own copy of the hooks (see hooks-sync.yml). So the one
+      # repo distributing the enforcement was the one repo without it, and it
+      # showed: 17 files had drifted to a stale holder name and 20 more carried
+      # no header at all.
+      #
+      # A CI check rather than a local hook, for the same reason: a hook can be
+      # skipped with GIT_HOOKS_SKIP=1 and only exists on machines that ran the
+      # installer. The holder string matches resq-cli's copyright default, and
+      # the year is left open so this does not need editing every January.
+      - name: Source files carry the copyright header
+        run: |
+          set -eu
+          rc=0
+
+          # grep -L lists files NOT matching, so find -exec does the whole job
+          # in one pass. A `for f in $(find ...)` loop would be SC2044-fragile
+          # on paths with spaces, and this repo now gates shellcheck at warning.
+          missing="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
+                       -not -path './worker/node_modules/*' -not -path './.git/*' \
+                       -exec grep -LE 'Copyright [0-9]{4} ResQ Systems, Inc\.' {} +)"
+          if [ -n "$missing" ]; then
+            printf '%s\n' "$missing" | while IFS= read -r f; do
+              [ -n "$f" ] && echo "::error file=$f::missing the copyright header (expected: Copyright <year> ResQ Systems, Inc.)"
+            done
+            rc=1
+          fi
+
+          # Report a wrong holder AS a wrong holder rather than as a missing
+          # header — that is the drift this check was added for.
+          stale="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
+                     -not -path './worker/node_modules/*' -not -path './.git/*' \
+                     -exec grep -lF 'ResQ Software' {} +)"
+          if [ -n "$stale" ]; then
+            printf '%s\n' "$stale" | while IFS= read -r f; do
+              [ -n "$f" ] && echo "::error file=$f::stale holder 'ResQ Software'; the canonical holder is 'ResQ Systems, Inc.'"
+            done
+            rc=1
+          fi
+
+          [ "$rc" -eq 0 ] || exit 1
+          echo "ok - every .sh/.ps1/.ts file carries the canonical header"
+
       # The cargo fallback in install-resq.sh is not a rare path — it is the
       # only one that runs, because crates publishes no resq-cli-v* release for
       # resolve_tag to find. It must pin, and the unpinned form must require an

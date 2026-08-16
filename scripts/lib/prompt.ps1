@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Interactive prompts and admin guards. Requires log.ps1 + platform.ps1.
 
 function Test-Interactive {

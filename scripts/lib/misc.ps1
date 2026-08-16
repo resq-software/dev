@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Miscellaneous helpers — GitHub API, port checks.
 #
 # Get-FileMd5 was here and is deliberately gone. It wrapped

@@ -14,3 +14,9 @@ worker/.wrangler/
 # pass without it. If bindings are ever added, un-ignore it, add it back to
 # tsconfig's include, and commit it.
 worker/worker-configuration.d.ts
+
+# A local `sh scripts/install-hooks.sh` writes the canonical hooks here.
+# They are deliberately NOT committed: crates owns the single copy and dev/
+# retired its own in Phase 4 (see hooks-sync.yml). Ignoring keeps a local
+# install from reintroducing it.
+.git-hooks/

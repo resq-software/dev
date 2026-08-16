@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Logging helpers — colors and log_info/success/warning/error.
 # Safe to source multiple times (no readonly vars).
 
