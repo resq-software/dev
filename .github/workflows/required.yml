@@ -98,9 +98,18 @@ jobs:
           # grep -L lists files NOT matching, so find -exec does the whole job
           # in one pass. A `for f in $(find ...)` loop would be SC2044-fragile
           # on paths with spaces, and this repo now gates shellcheck at warning.
+          #
+          # `|| true` is LOAD-BEARING, for exactly the reason bin/gen-pins.sh
+          # documents about `grep -c`: grep reports "did I match anything?" in
+          # its exit status, and with -L the clean case lists NOTHING, so it
+          # exits 1. Under `set -e` the command substitution inherits that and
+          # kills the step — silently, with no error output, precisely when
+          # every file is compliant. The first version of this check failed on
+          # a fully compliant tree. It passed locally only because an
+          # interactive shell has no `set -e`.
           missing="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
                        -not -path './worker/node_modules/*' -not -path './.git/*' \
-                       -exec grep -LE 'Copyright [0-9]{4} ResQ Systems, Inc\.' {} +)"
+                       -exec grep -LE 'Copyright [0-9]{4} ResQ Systems, Inc\.' {} + || true)"
           if [ -n "$missing" ]; then
             printf '%s\n' "$missing" | while IFS= read -r f; do
               [ -n "$f" ] && echo "::error file=$f::missing the copyright header (expected: Copyright <year> ResQ Systems, Inc.)"
@@ -110,9 +119,11 @@ jobs:
 
           # Report a wrong holder AS a wrong holder rather than as a missing
           # header — that is the drift this check was added for.
+          # Same `|| true`, mirror image: grep -l exits 1 when it finds NO
+          # match, which here is the clean case.
           stale="$(find . \( -name '*.sh' -o -name '*.ps1' -o -name '*.ts' \) \
                      -not -path './worker/node_modules/*' -not -path './.git/*' \
-                     -exec grep -lF 'ResQ Software' {} +)"
+                     -exec grep -lF 'ResQ Software' {} + || true)"
           if [ -n "$stale" ]; then
             printf '%s\n' "$stale" | while IFS= read -r f; do
               [ -n "$f" ] && echo "::error file=$f::stale holder 'ResQ Software'; the canonical holder is 'ResQ Systems, Inc.'"
