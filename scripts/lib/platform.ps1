@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Platform detection — OS and architecture normalization.
 
 # $IsWindows/$IsLinux/$IsMacOS are PowerShell 6+ automatic variables and do not

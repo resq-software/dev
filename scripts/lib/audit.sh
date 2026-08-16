@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Audit-tool bootstrap (osv-scanner, audit-ci).
 # Requires log.sh + platform.sh + packages.sh + prompt.sh.
 

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Nix install + flake re-exec. Requires log.sh + platform.sh + packages.sh.
 
 install_nix() {

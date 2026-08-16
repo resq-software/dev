@@ -1,3 +1,5 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Logging helpers — Log-Info/Success/Warning/Error.
 # Safe to dot-source multiple times.
 
