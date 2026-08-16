@@ -121,11 +121,13 @@ jobs:
           . $tmp
           Write-Host 'ok - install.ps1 loaded, Main stripped'
 
-          # The platform probe must produce a usable answer, not merely avoid
-          # throwing. A guard that yields $null on 5.1 would satisfy "it
-          # loaded" while leaving every downstream branch wrong.
-          if ($null -eq $IsNativeWindows) { throw 'install.ps1 platform detection produced no value' }
-          Write-Host "ok - platform detection resolved (IsNativeWindows=$IsNativeWindows)"
+          # Assert the RIGHT answer, not merely a non-null one. This runner is
+          # Windows, so $false is as wrong as $null — and a -eq $null check
+          # would have passed on it while the comment claimed otherwise.
+          if ($IsNativeWindows -ne $true) {
+            throw "install.ps1 platform detection returned '$IsNativeWindows' on a Windows runner; expected True"
+          }
+          Write-Host 'ok - platform detection resolved to True'
 
       # A parse check cannot see this: `exit` inside a ScriptBlock terminates
       # the CALLING script, which is how install-hooks.ps1 silently truncates
@@ -140,7 +142,23 @@ jobs:
           $env:RESQ_SKIP_LOCAL_SCAFFOLD = '1'
           # -Encoding UTF8 for the same 5.1 codepage reason as above.
           $sb = [ScriptBlock]::Create((Get-Content -Raw -Encoding UTF8 ./scripts/install-hooks.ps1))
-          try { & $sb -TargetDir $repo } catch { Write-Host "hook installer threw: $($_.Exception.Message)" }
-          # Reaching this line IS the assertion. If install-hooks.ps1 calls a
-          # top-level `exit`, the step ends above and never prints it.
+
+          # Log AND rethrow. The first version swallowed the exception and then
+          # printed success, so the step passed while reporting
+          # "hook installer threw: The variable '$IsLinux' cannot be retrieved"
+          # — a real 5.1 defect, surfaced and then discarded by the very test
+          # written to catch it. A failure that only produces a log line is not
+          # a test.
+          #
+          # The try/catch survives solely to label the failure; `throw` re-raises
+          # it so the step goes red.
+          try {
+            & $sb -TargetDir $repo
+          } catch {
+            Write-Host "::error::install-hooks.ps1 threw under $($PSVersionTable.PSVersion): $($_.Exception.Message)"
+            throw
+          }
+
+          # Reaching this line is the OTHER assertion: if install-hooks.ps1 calls
+          # a top-level `exit`, the step ends above and never prints it.
           Write-Host 'ok - control returned to the caller'
