@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Conventional Commits validation in the canonical commit-msg hook.
 
 load helpers

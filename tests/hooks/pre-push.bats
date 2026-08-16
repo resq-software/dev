@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Branch naming, force-push guard, stdin propagation in the canonical pre-push hook.
 
 load helpers
