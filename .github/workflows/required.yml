@@ -311,12 +311,46 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tok, [ref]$perr) | Out-Null
             if ($perr) { $fail = $true; Write-Host "PARSE ERROR: $($f.FullName)"; $perr | ForEach-Object { Write-Host "  $($_.Message)" } }
           }
-          # PSScriptAnalyzer findings are advisory until the repo's existing debt is burned down.
+          # PSScriptAnalyzer findings are advisory while the real debt is measured.
+          #
+          # This step used to pass `-Path $ps1.FullName`, where $ps1 is an ARRAY of
+          # FileInfo — so .FullName is String[] and -Path, which takes a single
+          # string, threw:
+          #
+          #   Cannot convert 'System.Object[]' to the type 'System.String'
+          #   required by parameter 'Path'
+          #
+          # The catch swallowed it, printed "skipped", and the job went green. The
+          # analyser had never examined a single line while the step name promised
+          # it had. Analysing per file removes the array entirely.
+          #
+          # The catch is kept for a genuinely absent module (offline runner), but it
+          # now names the stage that failed, so "not installed" can never again read
+          # the same as "found nothing".
           try {
             Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-            $issues = Invoke-ScriptAnalyzer -Path $ps1.FullName -Severity Error,Warning -ErrorAction Continue
-            if ($issues) { Write-Host '::group::PSScriptAnalyzer (advisory)'; ($issues | Format-Table -AutoSize | Out-String) | Write-Host; Write-Host '::endgroup::' }
-          } catch { Write-Host "PSScriptAnalyzer skipped: $($_.Exception.Message)" }
+          } catch {
+            Write-Host "::warning::PSScriptAnalyzer could not be installed: $($_.Exception.Message)"
+          }
+          if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
+            $issues = @()
+            foreach ($f in $ps1) {
+              $issues += Invoke-ScriptAnalyzer -Path $f.FullName -Severity Error,Warning -ErrorAction Continue
+            }
+            if ($issues) {
+              Write-Host '::group::PSScriptAnalyzer (advisory)'
+              ($issues | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize | Out-String -Width 200) | Write-Host
+              Write-Host '::endgroup::'
+              # A count, so the debt is a number someone can watch shrink rather than
+              # a wall of text nobody reads.
+              $bySeverity = $issues | Group-Object Severity | ForEach-Object { "$($_.Name)=$($_.Count)" }
+              Write-Host "::notice::PSScriptAnalyzer: $($issues.Count) findings ($($bySeverity -join ', '))"
+            } else {
+              Write-Host 'PSScriptAnalyzer: no Error/Warning findings'
+            }
+          } else {
+            Write-Host '::warning::PSScriptAnalyzer unavailable — analysis did NOT run'
+          }
           if ($fail) { throw 'PowerShell parse errors found' }
 
   worker:
