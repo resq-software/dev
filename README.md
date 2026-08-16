@@ -212,8 +212,8 @@ release rather than its trigger.
 ## 🔎 What CI actually verifies
 
 Most of this repo is two shell scripts and a Worker. Most of the engineering is
-in refusing to take anything on trust — including its own claims. Every check
-below runs on pull requests.
+in refusing to take anything on trust — including its own claims. The first two
+groups run on pull requests; the last runs after a deploy.
 
 **The distribution chain**
 
@@ -278,7 +278,13 @@ Six hook shims live in [`resq-software/crates`](https://github.com/resq-software
 1. **`resq` on PATH** → calls `resq hooks install`, which scaffolds the 6 canonical hooks from the templates embedded in the binary. Offline, versioned with the installed `resq`.
 2. **No `resq`** → fetches them over HTTPS from a **pinned commit** in `resq-software/crates`, and verifies each of the six against a digest baked into the installer before any of them is written.
 
-That second path used to fetch from `master` — a mutable branch — with no verification at all, which meant six files that git executes on every commit and push came from wherever that branch happened to point. It is now a commit SHA, which cannot be repointed, plus a SHA-256 check that **fails closed**: on any mismatch nothing is installed. Files are staged in a temp directory and published only once all six verify, so an interrupted or tampered fetch cannot leave a repo with half a hook set.
+That second path used to fetch from `master` — a mutable branch — with no verification at all, which meant six files that git executes on every commit and push came from wherever that branch happened to point. It is now a commit SHA, which cannot be repointed, plus a SHA-256 check that **fails closed**: on any mismatch nothing is installed.
+
+Precisely what that buys, since it is easy to overclaim:
+
+- **A failed verification publishes nothing.** All six are downloaded and checked in a temp directory first, so a mismatch on the last file cannot leave the first five installed and active.
+- **Each hook lands by atomic rename**, so an interrupt during publication can never leave a truncated file that git would still execute.
+- **The set is not atomic.** An interrupt between files can leave a mix of old and new hooks, each individually valid. Making the set atomic would mean swapping the whole directory, which would discard the `local-<hook>` customisations this design keeps there — a worse trade. Re-running the installer is the fix.
 
 `RESQ_CRATES_REF` still exists for testing an unreleased hook change, but a pinned digest cannot describe an arbitrary ref, so using it requires `RESQ_ALLOW_UNVERIFIED=1` and says so.
 

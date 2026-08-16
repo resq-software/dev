@@ -149,9 +149,32 @@ else
 
     # Publish only once every hook has verified, so a mismatch on the last file
     # cannot leave the first five installed and already active.
+    #
+    # Each file lands by atomic rename rather than being truncated in place.
+    # This used to be `cat "$_hk_tmp/$h" > "$HOOKS_DIR/$h"`, where the redirect
+    # truncates the destination BEFORE writing — so an interrupt mid-write left
+    # a truncated hook that git would still execute. A rename is atomic within a
+    # filesystem: every hook is either entirely the old one or entirely the new
+    # one, never half a file.
+    #
+    # The staging name sits inside HOOKS_DIR on purpose. Renaming out of the
+    # mktemp directory would usually cross a filesystem boundary (/tmp), where
+    # mv silently degrades to copy-then-unlink and the atomicity is lost.
+    #
+    # This makes each FILE atomic, not the set: an interrupt between hooks can
+    # still leave a mix of old and new, each individually valid. Making the set
+    # atomic would mean swapping the whole directory, which would discard the
+    # local-<hook> customisations this design deliberately keeps there.
     for h in $HOOKS; do
-        cat "$_hk_tmp/$h" > "$HOOKS_DIR/$h"
-        chmod +x "$HOOKS_DIR/$h"
+        if ! cp "$_hk_tmp/$h" "$HOOKS_DIR/.$h.new"; then
+            printf 'fail  Could not stage %s into %s\n' "$h" "$HOOKS_DIR" >&2
+            exit 1
+        fi
+        chmod +x "$HOOKS_DIR/.$h.new"
+        if ! mv -f "$HOOKS_DIR/.$h.new" "$HOOKS_DIR/$h"; then
+            printf 'fail  Could not publish %s\n' "$h" >&2
+            exit 1
+        fi
     done
     git -C "$TARGET_ROOT" config core.hooksPath .git-hooks
     if [ "$verify" = "1" ]; then
