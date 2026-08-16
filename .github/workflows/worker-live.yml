@@ -188,11 +188,17 @@ jobs:
               cache: "no-store",
               signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             });
+            // Status first, or the diagnosis lies. A 502 carries no
+            // content-length, so without this the check below reports a missing
+            // header and sends whoever reads it hunting for a header bug, when
+            // the endpoint is in fact refusing to serve.
+            if (!headRes.ok) fail(`HEAD /install.sh returned HTTP ${headRes.status}`);
             const declared = Number(headRes.headers.get("content-length"));
             const bodyRes = await fetch(`${ORIGIN}/install.sh`, {
               cache: "no-store",
               signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             });
+            if (!bodyRes.ok) fail(`GET /install.sh returned HTTP ${bodyRes.status}`);
             const actual = (await bodyRes.arrayBuffer()).byteLength;
             if (!Number.isFinite(declared) || declared <= 0) {
               fail(`HEAD /install.sh reported content-length "${headRes.headers.get("content-length")}"; the source promises HEAD carries a real length`);
