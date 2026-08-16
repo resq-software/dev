@@ -102,7 +102,14 @@ jobs:
       - name: install.ps1 loads without running
         run: |
           $ErrorActionPreference = 'Stop'
-          $src = Get-Content 'install.ps1'
+          # -Encoding UTF8 on BOTH ends, explicitly. Windows PowerShell 5.1's
+          # Get-Content defaults to the system ANSI codepage, while pwsh 7
+          # defaults to UTF-8 — and install.ps1 contains box-drawing characters
+          # and em-dashes. Without this, 5.1 read them as mojibake and wrote the
+          # mangled text back, corrupting quoting until the copy no longer
+          # parsed. The first run of this job failed exactly that way, on the
+          # 5.1 leg only, with "Missing closing '}'".
+          $src = Get-Content -Path 'install.ps1' -Encoding UTF8
           # Drop only a bare top-level call. Anchored, so a mention inside a
           # function body or a comment is left alone.
           $stripped = $src | Where-Object { $_ -notmatch '^\s*Main\s*$' }
@@ -131,7 +138,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $repo | Out-Null
           git -C $repo init --quiet
           $env:RESQ_SKIP_LOCAL_SCAFFOLD = '1'
-          $sb = [ScriptBlock]::Create((Get-Content -Raw ./scripts/install-hooks.ps1))
+          # -Encoding UTF8 for the same 5.1 codepage reason as above.
+          $sb = [ScriptBlock]::Create((Get-Content -Raw -Encoding UTF8 ./scripts/install-hooks.ps1))
           try { & $sb -TargetDir $repo } catch { Write-Host "hook installer threw: $($_.Exception.Message)" }
           # Reaching this line IS the assertion. If install-hooks.ps1 calls a
           # top-level `exit`, the step ends above and never prints it.
