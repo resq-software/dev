@@ -1,4 +1,4 @@
-# Copyright 2026 ResQ Software
+# Copyright 2026 ResQ Systems, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -48,7 +48,7 @@ $DistBase       = 'https://get.resq.software'
 
 # GENERATED — SHA-256 of scripts/install-hooks.ps1 at this version, checked
 # before that file is ever executed. Stamped by bin/stamp.sh.
-$HooksSha256    = '4327881e0b02448c7d8b1ae921691d654a46cb3ba99b82107b54ea6126effc85'
+$HooksSha256    = 'bb91b8887d7e0bef3f8e7337b78032f19478e28890585b1951ad1f9465e2cb3f'
 
 # Canonical repo table — one source of truth for the menu, validation and the
 # post-install summary. Those used to be three separate lists that could

@@ -1,6 +1,6 @@
 #!/bin/sh
 # shellcheck disable=SC2059
-# Copyright 2026 ResQ Software
+# Copyright 2026 ResQ Systems, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -86,7 +86,7 @@ DIST_BASE="https://get.resq.software"
 # the hook installer. A compromised endpoint still cannot get code past it.
 # Regenerate with:
 #   git cat-file blob "$(git rev-parse "v$SCRIPT_VERSION"):scripts/install-hooks.sh" | sha256sum
-HOOKS_SHA256="2d1eaa73203d91e59e07de66775e03e43b1caa227666357d395375028ba7c3d2"
+HOOKS_SHA256="f792fdc4c41283ffe4c5455ef32d681e61ba9695e650f3a4b137a6c55759549f"
 
 # Canonical repo table — one source of truth for the menu, REPO validation, and
 # the post-install summary. Those used to be three separate lists that could
