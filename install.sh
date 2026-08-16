@@ -141,7 +141,26 @@ cleanup() {
   done
   _TMP_PATHS=""
 }
-trap cleanup EXIT HUP INT QUIT TERM
+# EXIT and the signals get SEPARATE handlers, and the signal one exits.
+#
+# A trap on a non-EXIT signal runs its handler and then RESUMES the script — it
+# does not terminate. Verified in bash and in busybox ash: with a single
+# `trap cleanup EXIT HUP INT QUIT TERM`, Ctrl-C during a long step ran cleanup,
+# fell through to the next step, printed "Ready!" and exited 0.
+#
+# `set -e` does not rescue it, because every long step here sits in a condition:
+# `if ! sh "$_nix_installer" install`, `if nix develop ... --command true`,
+# `if ! gh release download`. A command in a condition context is exempt from
+# set -e by definition, so an interrupted step is merely observed and logged.
+#
+# The worst case is not Ctrl-C but SIGTERM in the documented unattended mode
+# (REPO=<name> YES=1): CI kills the run on timeout, the installer continues
+# through the remaining steps and exits 0, and the wrapper records a success.
+#
+# cleanup is idempotent — it clears _TMP_PATHS in the current shell (only the
+# read loop is a subshell), so the EXIT trap firing afterwards is a no-op.
+trap cleanup EXIT
+trap 'cleanup; exit 130' HUP INT QUIT TERM
 
 # Creates a temp directory, registers it for cleanup, and reports it in the
 # global TMPDIR_PATH. Fails loudly rather than returning an empty path that
