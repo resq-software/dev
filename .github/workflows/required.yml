@@ -348,15 +348,38 @@ jobs:
           # The catch is kept for a genuinely absent module (offline runner), but it
           # now names the stage that failed, so "not installed" can never again read
           # the same as "found nothing".
+          # Availability and findings are tracked as SEPARATE facts, because
+          # conflating them is the defect this step is fixing. "No findings" may
+          # only be printed when every file was actually analysed; otherwise a
+          # broken analyser reads exactly like clean code.
+          #
+          # Import explicitly rather than trusting Get-Module -ListAvailable:
+          # that tests discoverability, not importability, and a module can sit
+          # on disk yet fail to load.
+          $analyzerReady = $false
           try {
             Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+            Import-Module PSScriptAnalyzer -Force -ErrorAction Stop
+            $analyzerReady = $true
           } catch {
-            Write-Host "::warning::PSScriptAnalyzer could not be installed: $($_.Exception.Message)"
+            Write-Host "::warning::PSScriptAnalyzer unavailable, PowerShell was NOT analysed: $($_.Exception.Message)"
           }
-          if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
+          if ($analyzerReady) {
             $issues = @()
+            $analyzed = 0
+            $failed = @()
             foreach ($f in $ps1) {
-              $issues += Invoke-ScriptAnalyzer -Path $f.FullName -Severity Error,Warning -ErrorAction Continue
+              try {
+                # -ErrorAction Stop, not Continue. With Continue, a per-file
+                # failure leaves $issues untouched and that file is silently
+                # counted as clean — the same "absence reads as success" shape
+                # this step exists to remove.
+                $issues += Invoke-ScriptAnalyzer -Path $f.FullName -Severity Error,Warning -ErrorAction Stop
+                $analyzed++
+              } catch {
+                $failed += $f.FullName
+                Write-Host "::warning::PSScriptAnalyzer failed on $($f.FullName): $($_.Exception.Message)"
+              }
             }
             if ($issues) {
               Write-Host '::group::PSScriptAnalyzer (advisory)'
@@ -365,12 +388,15 @@ jobs:
               # A count, so the debt is a number someone can watch shrink rather than
               # a wall of text nobody reads.
               $bySeverity = $issues | Group-Object Severity | ForEach-Object { "$($_.Name)=$($_.Count)" }
-              Write-Host "::notice::PSScriptAnalyzer: $($issues.Count) findings ($($bySeverity -join ', '))"
+              Write-Host "::notice::PSScriptAnalyzer: $($issues.Count) findings across $analyzed/$($ps1.Count) files ($($bySeverity -join ', '))"
+            } elseif ($failed.Count -gt 0) {
+              # Empty findings AND failed files is the false zero. Never report
+              # it as clean: an analyser that could not read a file has said
+              # nothing about that file, which is not the same as approving it.
+              Write-Host "::warning::PSScriptAnalyzer produced no findings, but $($failed.Count) of $($ps1.Count) file(s) could not be analysed — this is NOT a clean result"
             } else {
-              Write-Host 'PSScriptAnalyzer: no Error/Warning findings'
+              Write-Host "PSScriptAnalyzer: no Error/Warning findings across all $analyzed file(s)"
             }
-          } else {
-            Write-Host '::warning::PSScriptAnalyzer unavailable — analysis did NOT run'
           }
           if ($fail) { throw 'PowerShell parse errors found' }
 
