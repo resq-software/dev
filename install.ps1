@@ -302,7 +302,10 @@ function Install-Nix {
                 ForEach-Object { $env:PATH = $_ }
         }
         elseif (Test-Path "$HOME/.nix-profile/etc/profile.d/nix.sh") {
-            bash -c ". $HOME/.nix-profile/etc/profile.d/nix.sh && echo \$PATH" |
+            # Single-quoted: Windows PowerShell 5.1 rejects `&&` even inside a
+            # double-quoted string ("not a valid statement separator in this
+            # version"), so `$HOME` is spliced in by concatenation instead.
+            bash -c '. ' + $HOME + '/.nix-profile/etc/profile.d/nix.sh && echo $PATH' |
                 ForEach-Object { $env:PATH = $_ }
         }
     }
