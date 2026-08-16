@@ -1,0 +1,136 @@
+# Copyright 2026 ResQ Software
+# SPDX-License-Identifier: Apache-2.0
+#
+# Execute the PowerShell installers on Windows. Nothing else in this repo ever
+# does — the `powershell` job in required.yml parses and lints them on Ubuntu,
+# which cannot catch anything that only happens at runtime, on Windows, or on a
+# particular PowerShell version.
+#
+# That gap is not hypothetical. Two runtime defects reached main through it:
+#
+#   * install.ps1 read $IsWindows at top level under `Set-StrictMode -Version
+#     Latest`. Those automatic variables arrived in PowerShell 6, so on Windows
+#     PowerShell 5.1 — which `#Requires -Version 5.1` explicitly admits, and
+#     which is what `irm ... | iex` hits on a stock Windows box — the script
+#     aborted before printing anything.
+#
+#   * scripts/install-hooks.ps1 calls `exit` at top level while install.ps1
+#     invokes it as a ScriptBlock, so it tears down the installer that embedded
+#     it, on the default first-install path.
+#
+# Both are load-time or early-runtime failures. Both are invisible to a parser.
+# Both would have been caught by starting the script once.
+#
+# NOTHING HERE MUTATES THE MACHINE. The installers are loaded with their final
+# entrypoint call stripped, so constants, platform detection and function
+# definitions all execute while the entrypoint never runs. No clone, no
+# toolchain install.
+
+name: windows-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.ps1'
+      - '.github/workflows/windows-smoke.yml'
+  pull_request:
+    paths:
+      - '**.ps1'
+      - '.github/workflows/windows-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load:
+    name: load installers (${{ matrix.name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows PowerShell 5.1 matters most: it ships in the box,
+          # `#Requires -Version 5.1` admits it, and it is what a stock
+          # `irm ... | iex` runs. It is also the only shell that would have
+          # caught the $IsWindows defect.
+          - name: Windows PowerShell 5.1
+            shell: powershell
+          # PowerShell 7+, what a developer who installed pwsh will use.
+          - name: PowerShell 7
+            shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Report the shell actually under test
+        shell: ${{ matrix.shell }}
+        run: $PSVersionTable | Format-List PSVersion, PSEdition | Out-String | Write-Host
+
+      # Dot-sourcing runs every top-level statement in the library set: the
+      # StrictMode declaration, the platform probes, and each function
+      # definition. platform.ps1 reads $IsWindows/$IsLinux/$IsMacOS, so this
+      # step alone fails on 5.1 if that read is unguarded.
+      - name: Libraries load
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./scripts/lib/shell-utils.ps1
+          Write-Host 'ok - scripts/lib/*.ps1 dot-sourced'
+
+      # Load install.ps1 with its final Main call removed, so everything above
+      # it executes and Main does not. This is what catches a top-level crash
+      # like the $IsWindows one: it happens on load, before any function runs.
+      #
+      # ONLY install.ps1. scripts/setup.ps1 is deliberately excluded and must
+      # stay excluded: it is a top-to-bottom script, not definitions plus an
+      # entrypoint, and it calls Install-Nix on line 60 and Install-Docker on
+      # line 62. There is no line to strip that makes loading it inert — doing
+      # so would install a toolchain on the runner. Its parse is covered by the
+      # powershell job in required.yml; exercising it safely needs a container
+      # or a stubbed PATH, which is a bigger change than this one.
+      - name: install.ps1 loads without running
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Get-Content 'install.ps1'
+          # Drop only a bare top-level call. Anchored, so a mention inside a
+          # function body or a comment is left alone.
+          $stripped = $src | Where-Object { $_ -notmatch '^\s*Main\s*$' }
+          if ($src.Count -eq $stripped.Count) {
+            throw 'install.ps1: expected a top-level Main call to strip and found none - this guard has drifted from the script'
+          }
+          $tmp = Join-Path $env:RUNNER_TEMP 'smoke-install.ps1'
+          Set-Content -Path $tmp -Value $stripped -Encoding UTF8
+          . $tmp
+          Write-Host 'ok - install.ps1 loaded, Main stripped'
+
+          # The platform probe must produce a usable answer, not merely avoid
+          # throwing. A guard that yields $null on 5.1 would satisfy "it
+          # loaded" while leaving every downstream branch wrong.
+          if ($null -eq $IsNativeWindows) { throw 'install.ps1 platform detection produced no value' }
+          Write-Host "ok - platform detection resolved (IsNativeWindows=$IsNativeWindows)"
+
+      # A parse check cannot see this: `exit` inside a ScriptBlock terminates
+      # the CALLING script, which is how install-hooks.ps1 silently truncates
+      # the installer. Run it the way install.ps1 does and assert the caller
+      # gets control back.
+      - name: install-hooks.ps1 does not terminate its caller
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $repo = Join-Path $env:RUNNER_TEMP 'smoke-repo'
+          New-Item -ItemType Directory -Force -Path $repo | Out-Null
+          git -C $repo init --quiet
+          $env:RESQ_SKIP_LOCAL_SCAFFOLD = '1'
+          $sb = [ScriptBlock]::Create((Get-Content -Raw ./scripts/install-hooks.ps1))
+          try { & $sb -TargetDir $repo } catch { Write-Host "hook installer threw: $($_.Exception.Message)" }
+          # Reaching this line IS the assertion. If install-hooks.ps1 calls a
+          # top-level `exit`, the step ends above and never prints it.
+          Write-Host 'ok - control returned to the caller'
