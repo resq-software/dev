@@ -56,17 +56,49 @@ detect_target() {
 }
 TARGET="$(detect_target)"
 
-# ── Cargo-install fallback (used by 2 paths below) ───────────────────────────
+# ── Cargo-install fallback (used by 3 paths below) ───────────────────────────
+#
+# This is not the rare path. It is, today, the ONLY path: no resq-cli-v* release
+# exists, so resolve_tag finds nothing and every run lands here. Until releases
+# are published, this function is what `curl .../resq.sh | sh` actually runs.
+#
+# It used to end in `cargo install --git <repo> resq-cli` with no --rev and no
+# --tag, which builds whatever the default branch points at that second. The
+# Worker hands this script over pinned to a commit and verified byte for byte,
+# and the script then discarded that guarantee one hop later. It was also the
+# only unverified branch in this repo not gated by RESQ_ALLOW_UNVERIFIED — the
+# silent default rather than a deliberate choice.
+#
+# Bump alongside CRATES_COMMIT in scripts/install-hooks.sh when moving to a newer
+# crates revision. required.yml checks this commit exists and is an ancestor of
+# the crates default branch, so a typo or a rebased-away commit fails CI rather
+# than every user's install.
+CRATES_COMMIT="cdc3aa0203ee5785ec1b0ceaafc8937688e6c5c3"
+
 cargo_install() {
     if ! command -v cargo >/dev/null 2>&1; then
         fail "cargo not found and no release binary available — install Rust (https://rustup.rs) and re-run."
     fi
-    info "Installing via cargo install --git $REPO resq-cli ..."
+
     if [ -n "$WANTED_VERSION" ]; then
+        # An explicit version is a request for that tag, so honour it. Weaker
+        # than a commit pin — a tag can be force-moved by anyone with write
+        # access, where a commit SHA cannot — but the user named this version,
+        # and quietly building a different one would be worse.
+        info "Installing resq-cli at tag ${TAG_PREFIX}${WANTED_VERSION} via cargo ..."
         cargo install --git "https://github.com/$REPO" --tag "${TAG_PREFIX}${WANTED_VERSION}" resq-cli
-    else
-        cargo install --git "https://github.com/$REPO" resq-cli
+        return
     fi
+
+    if [ "${RESQ_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+        warn "Building resq-cli from the $REPO default branch — unpinned, whatever it points at right now (RESQ_ALLOW_UNVERIFIED=1)."
+        cargo install --git "https://github.com/$REPO" resq-cli
+        return
+    fi
+
+    # The default: a commit SHA, which cannot be repointed.
+    info "Installing resq-cli from pinned commit $CRATES_COMMIT via cargo ..."
+    cargo install --git "https://github.com/$REPO" --rev "$CRATES_COMMIT" resq-cli
 }
 
 if [ "${RESQ_FORCE_CARGO:-0}" = "1" ]; then

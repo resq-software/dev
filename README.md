@@ -111,7 +111,7 @@ Each script can be run on its own without going through the full onboarding flow
 |---|---|---|
 | `install.sh` / `install.ps1` | Full onboarding — installs prereqs, clones a repo, sets up dev env + hooks | `curl -fsSL https://get.resq.software \| sh` |
 | `install-hooks.sh` / `install-hooks.ps1` | Drop the canonical git hooks into any repo. Asks to scaffold `local-pre-push` if `resq` is on PATH | `cd <repo> && curl -fsSL https://get.resq.software/hooks.sh \| sh` |
-| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git` if no release asset matches the host platform | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
+| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git --rev <pinned commit>` when no release asset matches — today that fallback is the only path, since no `resq-cli-v*` release exists yet | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
 
 Every one of these is served pinned and hash-verified, and each has a
 version-locked form — `https://get.resq.software/v0.4.0/hooks.sh` and so on.

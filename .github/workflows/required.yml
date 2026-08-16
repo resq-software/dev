@@ -55,6 +55,54 @@ jobs:
       - name: Installers stamped from VERSION
         run: sh bin/stamp.sh --check
 
+      # The cargo fallback in install-resq.sh is not a rare path — it is the
+      # only one that runs, because crates publishes no resq-cli-v* release for
+      # resolve_tag to find. It must pin, and the unpinned form must require an
+      # explicit opt-out. Stubs cargo; compiles nothing, fetches nothing.
+      - name: install-resq.sh pins its cargo fallback
+        run: sh tests/installers/pinning.sh
+
+      - name: The pinned crates commits still exist upstream
+        # A commit SHA cannot be repointed, which is the point of pinning — but
+        # it can be mistyped or rebased away, and either way every user's
+        # install dies at `cargo install --rev`. Better a red check here.
+        #
+        # Ancestry, not merely existence: a commit can resolve while sitting on
+        # an abandoned branch, and pinning to something never merged is not the
+        # reviewed history this is meant to point at.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resq_pin="$(sed -n 's/^CRATES_COMMIT="\(.*\)"$/\1/p' scripts/install-resq.sh)"
+          hooks_pin="$(sed -n 's/^ *CRATES_COMMIT="\(.*\)"$/\1/p' scripts/install-hooks.sh)"
+          [ -n "$resq_pin" ] || { echo "::error::could not read CRATES_COMMIT from scripts/install-resq.sh"; exit 1; }
+
+          rc=0
+          for pin in "$resq_pin" "$hooks_pin"; do
+            [ -n "$pin" ] || continue
+            if ! body="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                 "https://api.github.com/repos/resq-software/crates/compare/master...$pin")"; then
+              echo "::error::$pin is not resolvable in resq-software/crates"
+              rc=1; continue
+            fi
+            status="$(printf '%s' "$body" | sed -n 's/.*"status":[[:space:]]*"\([a-z]*\)".*/\1/p' | head -1)"
+            case "$status" in
+              identical|behind) echo "ok — $pin is on master ($status)" ;;
+              *) echo "::error::$pin is '$status' relative to master; pin a commit that is merged"; rc=1 ;;
+            esac
+          done
+
+          # They may legitimately differ — hooks and the CLI can move at
+          # different times — but if they agree, say so: one crates revision per
+          # dev release is the easier thing to reason about.
+          if [ "$resq_pin" = "$hooks_pin" ]; then
+            echo "ok — install-resq.sh and install-hooks.sh pin the same crates commit"
+          else
+            echo "::notice::install-resq.sh pins $resq_pin, install-hooks.sh pins $hooks_pin"
+          fi
+          exit "$rc"
+
       - name: Hook digests match the pinned crates commit
         # install-hooks.{sh,ps1} fetch six files that become executables git
         # runs on every commit and push. They used to come from a mutable
