@@ -73,7 +73,7 @@ TARGET="$(detect_target)"
 # crates revision. required.yml checks this commit exists and is an ancestor of
 # the crates default branch, so a typo or a rebased-away commit fails CI rather
 # than every user's install.
-CRATES_COMMIT="cdc3aa0203ee5785ec1b0ceaafc8937688e6c5c3"
+CRATES_COMMIT="d84cd9613da685ffb772a766673d6ba6a4acaf31"
 
 cargo_install() {
     if ! command -v cargo >/dev/null 2>&1; then
