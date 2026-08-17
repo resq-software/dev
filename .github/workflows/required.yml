@@ -76,6 +76,63 @@ jobs:
       - name: Installers stamped from VERSION
         run: sh bin/stamp.sh --check
 
+      # A released VERSION must keep describing the artifacts it was tagged on.
+      #
+      # `stamp.sh --check` only proves the tree is internally consistent: it
+      # hashes the working tree and compares against stamps in that same tree.
+      # It cannot notice that "0.4.4" means something different here than it
+      # does at the v0.4.4 tag. That gap is not hypothetical — it is why this
+      # step exists. A pin bump merged into main without a VERSION bump, every
+      # check stayed green, and main's install.sh was left expecting a hooks
+      # digest that the tag it downloads from does not have; running it from a
+      # main checkout refused to install hooks. The curl-piped path was
+      # unaffected, because the endpoint serves the tag, which is self-
+      # consistent — so the damage was invisible from outside.
+      #
+      # Only fires once the tag exists, so the ordinary flow (bump VERSION,
+      # merge, tag) is unaffected. It catches the reverse: editing a shipped
+      # artifact while VERSION still points at a tag that no longer matches it.
+      - name: A tagged VERSION still matches its artifacts
+        run: |
+          set -eu
+          version="$(tr -d ' \t\r\n' < VERSION)"
+          tag="v$version"
+
+          # checkout is shallow and fetches no tags, so asking the local repo
+          # whether the tag exists would answer "no" every time and this step
+          # would pass without comparing anything. Ask the remote, and treat
+          # only ls-remote's documented "no match" status as not-yet-tagged —
+          # any other failure is a broken check, not a clean tree.
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1
+          lookup=$?
+          set -e
+          case "$lookup" in
+            0) ;;
+            2) echo "ok — $tag is not tagged yet; nothing to compare against"; exit 0 ;;
+            *) echo "::error::could not determine whether $tag exists (git ls-remote exit $lookup)"; exit 1 ;;
+          esac
+
+          git fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+
+          rc=0
+          for f in install.sh install.ps1 scripts/install-hooks.sh \
+                   scripts/install-hooks.ps1 scripts/install-resq.sh; do
+            if ! git cat-file -e "$tag:$f" 2>/dev/null; then
+              echo "::error::$f does not exist at $tag"
+              rc=1
+              continue
+            fi
+            tagged="$(git show "$tag:$f" | sha256sum | cut -d' ' -f1)"
+            here="$(sha256sum < "$f" | cut -d' ' -f1)"
+            if [ "$tagged" != "$here" ]; then
+              echo "::error::$f differs from $tag but VERSION is still $version — bump VERSION and restamp"
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] && echo "ok — all five artifacts match $tag"
+          exit "$rc"
+
       # Every source file carries the canonical copyright header.
       #
       # In every other ResQ repo this is enforced by `resq copyright`, run from
