@@ -185,7 +185,7 @@ interface RouteTarget {
 // still checked against PinConfig at compile time.
 
 const PINS = {
-  "latest": "0.4.4",
+  "latest": "0.4.5",
   "releases": {
     "0.4.0": {
       "commit": "228b73de77d2e20a3d7a2e7137e508de9e602f16",
@@ -243,6 +243,18 @@ const PINS = {
         "scripts/install-hooks.sh": "c0d99528b1af991dd40d1c17904faf3366672fba57d06cec10419214d40feb42",
         "scripts/install-hooks.ps1": "bb91b8887d7e0bef3f8e7337b78032f19478e28890585b1951ad1f9465e2cb3f",
         "scripts/install-resq.sh": "677e3fe1b8858e6d17f79d29f451c478215601e1e14b1ef463016499e3e7ca6a",
+        "scripts/setup.sh": "6792ee2e02bcfa982046a36ed68532f4af44be93fd1243fc77a253d303767ca1",
+        "scripts/setup.ps1": "899a4840661be11ab3104e1aca60f3bfb78f8a7139bf6a373803d6c1c0a8db55"
+      }
+    },
+    "0.4.5": {
+      "commit": "ee962f6ebc868e3323cfd41f42dcdf2887b52302",
+      "artifacts": {
+        "install.sh": "2d2b2d27a2f3df1d6fd4d7d1fd61032411679c9bb307ff8abc45038092d61bb5",
+        "install.ps1": "69e836f83716e8e6c6649dd2aa18a825973294c38c4ec60a61a0989cff51e9fb",
+        "scripts/install-hooks.sh": "c5aa6c94eca52d384d6c7a78c786aecdeaf8f76d69db908d5d2439ba31859065",
+        "scripts/install-hooks.ps1": "816581068a9c0a2b88b799b3f081bdd4b1600840d10784d51ae2c8fb8ab1ccbc",
+        "scripts/install-resq.sh": "fe891c2648222cf4d80cac8b178a619dac3e27f72c6efed624cd28febd8a32dc",
         "scripts/setup.sh": "6792ee2e02bcfa982046a36ed68532f4af44be93fd1243fc77a253d303767ca1",
         "scripts/setup.ps1": "899a4840661be11ab3104e1aca60f3bfb78f8a7139bf6a373803d6c1c0a8db55"
       }
