@@ -91,7 +91,7 @@ if ($resqBin) {
     # Pinned commit in resq-software/crates. Keep in step with the digests below
     # and with scripts/install-hooks.sh; required.yml re-checks all three
     # against the live endpoint, so drift fails CI rather than a user's install.
-    $cratesCommit = 'cdc3aa0203ee5785ec1b0ceaafc8937688e6c5c3'
+    $cratesCommit = 'd84cd9613da685ffb772a766673d6ba6a4acaf31'
     $hookDigests = @{
         'pre-commit'         = '540c19f96fe258df6d90a8357b27513657b380567650ce3aaed83efa216a64ee'
         'commit-msg'         = 'e7fa95d5d54f212ef145ae9d53cae08b24b0f9dbd5501fde1dae0aa4ddfeb2a6'
