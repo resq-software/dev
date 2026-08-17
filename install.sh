@@ -44,7 +44,7 @@ fi
 # install.sh keeps verifying against the digest it actually shipped with rather
 # than against whatever happens to be current. release.yml refuses to publish a
 # tag whose version disagrees with this value.
-SCRIPT_VERSION="0.4.3"
+SCRIPT_VERSION="0.4.4"
 
 # Everything this script creates belongs to the invoking user alone. Set before
 # the first mkdir/mktemp so nothing is even briefly group- or world-readable.
