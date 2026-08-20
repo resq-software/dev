@@ -45,5 +45,19 @@ jobs:
             *) echo "Title has no conventional type prefix; nothing to label."; exit 0 ;;
           esac
           echo "Conventional type '$type' -> $label"
+
+          # Managed change-type labels this workflow owns. On a retitle (e.g.
+          # feat -> fix) the workflow re-runs via the `edited` event, so the
+          # stale C-* label must be dropped first — otherwise release.yml's
+          # first-match categorization would keep the PR under the old section.
+          managed="C-Feature C-Bug C-Performance C-Documentation C-Refactor C-Testing C-Chore"
+          current="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
+          for m in $managed; do
+            if [ "$m" != "$label" ] && printf '%s\n' "$current" | grep -Fxq -- "$m"; then
+              gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$m" \
+                || echo "::warning::failed to remove stale label '$m'."
+            fi
+          done
+
           gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$label" \
             || echo "::warning::label '$label' not found yet (run Label Sync); skipped."

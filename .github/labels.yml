@@ -132,6 +132,34 @@
   color: "c5def5"
   description: "Changes to the Nix flake (flake.nix / flake.lock)"
 
+# --- Size (size/) --- (applied by .github/workflows/pr-size-labeler.yml) ---
+# pascalgn/size-label-action does not create labels; they must pre-exist, so
+# label-sync provisions them here. Thresholds mirror the action's defaults
+# (XS 0-9, S 10-29, M 30-99, L 100-499, XL 500-999, XXL 1000+ changed lines).
+- name: "size/XS"
+  color: "3fb950"
+  description: "PR size: extra small (< 10 lines changed)"
+
+- name: "size/S"
+  color: "56d364"
+  description: "PR size: small (10-29 lines changed)"
+
+- name: "size/M"
+  color: "d4a72c"
+  description: "PR size: medium (30-99 lines changed)"
+
+- name: "size/L"
+  color: "db6d28"
+  description: "PR size: large (100-499 lines changed)"
+
+- name: "size/XL"
+  color: "f85149"
+  description: "PR size: extra large (500-999 lines changed)"
+
+- name: "size/XXL"
+  color: "da3633"
+  description: "PR size: extra extra large (1000+ lines changed)"
+
 # --- Release notes categories --- (referenced by .github/release.yml) ---
 - name: "type:feature"
   color: "a2eeef"

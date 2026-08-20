@@ -31,4 +31,15 @@ jobs:
       - uses: pascalgn/size-label-action@56b489b027932ec0cf60438a1a5f1a19c8fc71ff # v0.5.7
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-          IGNORED: ".*\\.lock$|bun\\.lock|\\.lock\\.yml$"
+          # IGNORED is parsed by size-label-action as newline-separated glob
+          # expressions (gitignore-style), NOT a regex. Lockfiles are generated
+          # noise, so exclude them from the change-size calculation.
+          IGNORED: |
+            *.lock
+            **/*.lock
+            *.lock.yml
+            **/*.lock.yml
+            package-lock.json
+            **/package-lock.json
+            bun.lock
+            **/bun.lock
