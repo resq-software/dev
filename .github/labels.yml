@@ -1,0 +1,258 @@
+# Copyright 2026 ResQ Systems, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Standardized label definitions (shared ResQ org taxonomy).
+# Synced to the repository by .github/workflows/label-sync.yml.
+
+# --- Type (C- Category) ---
+- name: "C-Bug"
+  color: "d73a4a"
+  description: Something isn't working
+
+- name: "C-Feature"
+  color: "a2eeef"
+  description: New feature or request
+
+- name: "C-Documentation"
+  color: "0075ca"
+  description: Improvements or additions to documentation
+
+- name: "C-Security"
+  color: "e4e669"
+  description: Security vulnerability or improvement
+
+- name: "C-Performance"
+  color: "f9d0c4"
+  description: Performance regression or optimization
+
+- name: "C-Refactor"
+  color: "d4c5f9"
+  description: Code refactoring with no behavior change
+
+- name: "C-Breaking-Change"
+  color: "b60205"
+  description: Breaking change to the API or behavior
+
+- name: "C-Chore"
+  color: "ededed"
+  description: "Chore: deps, tooling, or config with no public API change"
+
+- name: "C-Design"
+  color: "d4c5f9"
+  description: Design assets and tokens
+
+- name: "C-Testing"
+  color: "c2e0c6"
+  description: Tests and test tooling
+
+# --- Priority (P-) ---
+- name: "P0: critical"
+  color: "b60205"
+  description: "Outage or data loss — drop everything"
+
+- name: "P1: high"
+  color: "d93f0b"
+  description: "Major impact — fix this sprint"
+
+- name: "P2: medium"
+  color: "fbca04"
+  description: "Moderate impact — fix soon"
+
+- name: "P3: low"
+  color: "0e8a16"
+  description: "Minor impact — fix when convenient"
+
+# --- Area (A-) --- (path-based, applied by .github/labeler.yml) ---
+- name: "A-TypeScript"
+  color: "3178c6"
+  description: TypeScript/JavaScript code
+
+- name: "A-CI"
+  color: "000000"
+  description: "CI/CD, workflows, actions, and git hooks"
+
+- name: "A-Build"
+  color: "5319e7"
+  description: "Build configuration (tsdown, tsconfig)"
+
+- name: "A-Storybook"
+  color: "ff4785"
+  description: "Storybook stories and configuration"
+
+- name: "A-Examples"
+  color: "1d76db"
+  description: "Example applications under examples/"
+
+- name: "A-Effect"
+  color: "8250df"
+  description: "Effect-based code (Schema, fetchers, mailer)"
+
+- name: "A-DevOps"
+  color: "2188ff"
+  description: "CI, workflows, actions, and repo infra (.github)"
+
+- name: "A-Release"
+  color: "6f42c1"
+  description: "Release plumbing (VERSION, pins, stamp, release workflow)"
+
+# --- Area scope (area:) --- (path-based, applied by .github/labeler.yml) ---
+# This repo is a shell-installer distribution keyed to top-level source dirs.
+- name: "area:worker"
+  color: "c5def5"
+  description: "Changes under worker/"
+
+- name: "area:bin"
+  color: "c5def5"
+  description: "Changes under bin/"
+
+- name: "area:scripts"
+  color: "c5def5"
+  description: "Changes under scripts/"
+
+- name: "area:tests"
+  color: "c5def5"
+  description: "Changes under tests/"
+
+- name: "area:installers"
+  color: "c5def5"
+  description: "Changes to install.sh / install.ps1"
+
+- name: "area:nix"
+  color: "c5def5"
+  description: "Changes to the Nix flake (flake.nix / flake.lock)"
+
+# --- Size (size/) --- (applied by .github/workflows/pr-size-labeler.yml) ---
+# pascalgn/size-label-action does not create labels; they must pre-exist, so
+# label-sync provisions them here. Thresholds mirror the action's defaults
+# (XS 0-9, S 10-29, M 30-99, L 100-499, XL 500-999, XXL 1000+ changed lines).
+- name: "size/XS"
+  color: "3fb950"
+  description: "PR size: extra small (< 10 lines changed)"
+
+- name: "size/S"
+  color: "56d364"
+  description: "PR size: small (10-29 lines changed)"
+
+- name: "size/M"
+  color: "d4a72c"
+  description: "PR size: medium (30-99 lines changed)"
+
+- name: "size/L"
+  color: "db6d28"
+  description: "PR size: large (100-499 lines changed)"
+
+- name: "size/XL"
+  color: "f85149"
+  description: "PR size: extra large (500-999 lines changed)"
+
+- name: "size/XXL"
+  color: "da3633"
+  description: "PR size: extra extra large (1000+ lines changed)"
+
+# --- Release notes categories --- (referenced by .github/release.yml) ---
+- name: "type:feature"
+  color: "a2eeef"
+  description: New feature or request
+
+- name: "feature"
+  color: "a2eeef"
+  description: New feature or request
+
+- name: "enhancement"
+  color: "a2eeef"
+  description: New feature or request
+
+- name: "type:fix"
+  color: "d73a4a"
+  description: Bug fix
+
+- name: "fix"
+  color: "d73a4a"
+  description: Bug fix
+
+- name: "bug"
+  color: "d73a4a"
+  description: Something isn't working
+
+- name: "type:chore"
+  color: "ededed"
+  description: "Chore: tooling, deps, or config"
+
+- name: "chore"
+  color: "ededed"
+  description: "Chore: tooling, deps, or config"
+
+- name: "ignore-for-release"
+  color: "cfd3d7"
+  description: Exclude this PR from generated release notes
+
+- name: "skip-changelog"
+  color: "cfd3d7"
+  description: Exclude this PR from the changelog
+
+# --- Dependency automation ---
+- name: "dependencies"
+  color: "0366d6"
+  description: Automated dependency updates
+
+- name: "github-actions"
+  color: "1f6feb"
+  description: GitHub Actions dependency updates
+
+- name: "javascript"
+  color: "f1e05a"
+  description: JavaScript and TypeScript dependency updates
+
+# --- Status (S-) ---
+- name: "S-Needs-Triage"
+  color: "ededed"
+  description: Needs initial assessment
+
+- name: "S-In-Progress"
+  color: "1d76db"
+  description: Actively being worked on
+
+- name: "S-Blocked"
+  color: "b60205"
+  description: Blocked by external dependency or decision
+
+- name: "S-Needs-Review"
+  color: "fbca04"
+  description: Ready for code review
+
+- name: "S-Ready-To-Merge"
+  color: "0e8a16"
+  description: "Approved and ready to be merged"
+
+# --- Community ---
+- name: "good first issue"
+  color: "7057ff"
+  description: Good for newcomers
+
+- name: "help wanted"
+  color: "008672"
+  description: Extra attention is needed
+
+# --- Workflow ---
+- name: "pinned"
+  color: "006b75"
+  description: Exempt from stale bot
+
+- name: "duplicate"
+  color: "cfd3d7"
+  description: This issue or PR already exists
+
+- name: "wontfix"
+  color: "ffffff"
+  description: This will not be worked on

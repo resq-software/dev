@@ -1,0 +1,45 @@
+# Copyright 2026 ResQ Systems, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: PR Size Labeler
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] -- needs write access; guarded by same-repo check
+    types: [opened, synchronize]
+
+permissions: {}
+
+jobs:
+  labeler:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pascalgn/size-label-action@56b489b027932ec0cf60438a1a5f1a19c8fc71ff # v0.5.7
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          # IGNORED is parsed by size-label-action as newline-separated glob
+          # expressions (gitignore-style), NOT a regex. Lockfiles are generated
+          # noise, so exclude them from the change-size calculation.
+          IGNORED: |
+            *.lock
+            **/*.lock
+            *.lock.yml
+            **/*.lock.yml
+            package-lock.json
+            **/package-lock.json
+            bun.lock
+            **/bun.lock
