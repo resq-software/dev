@@ -1,0 +1,35 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Categorizes the notes that `gh release create --generate-notes` produces
+# (grouping merged PRs by label into sections). Those categorized notes flow
+# into the resq-software/landing changelog aggregator, whose `kind` inference
+# reads these section headers — so labeling PRs makes the changelog's
+# feature/fix/improvement classification accurate instead of a default guess.
+# Add `type:*` labels (or the conventional feature/fix/chore labels) to PRs to
+# populate the sections; the path labels from .github/labeler.yml also apply.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+  categories:
+    - title: ✨ Features
+      labels:
+        - "type:feature"
+        - feature
+        - enhancement
+    - title: 🐛 Fixes
+      labels:
+        - "type:fix"
+        - fix
+        - bug
+    - title: 🔧 Maintenance
+      labels:
+        - "type:chore"
+        - chore
+        - dependencies
+        - A-DevOps
+    - title: Other Changes
+      labels:
+        - "*"
