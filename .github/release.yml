@@ -6,8 +6,9 @@
 # into the resq-software/landing changelog aggregator, whose `kind` inference
 # reads these section headers — so labeling PRs makes the changelog's
 # feature/fix/improvement classification accurate instead of a default guess.
-# Add `type:*` labels (or the conventional feature/fix/chore labels) to PRs to
-# populate the sections; the path labels from .github/labeler.yml also apply.
+# Add the org's C-* category labels (C-Feature, C-Bug, C-Performance,
+# C-Documentation, C-Chore, C-Refactor) to PRs to populate the sections; the
+# path labels from .github/labeler.yml also apply.
 changelog:
   exclude:
     labels:
@@ -15,21 +16,14 @@ changelog:
       - skip-changelog
   categories:
     - title: ✨ Features
-      labels:
-        - "type:feature"
-        - feature
-        - enhancement
+      labels: ["C-Feature"]
     - title: 🐛 Fixes
-      labels:
-        - "type:fix"
-        - fix
-        - bug
+      labels: ["C-Bug"]
+    - title: ⚡ Performance
+      labels: ["C-Performance"]
+    - title: 📚 Documentation
+      labels: ["C-Documentation"]
     - title: 🔧 Maintenance
-      labels:
-        - "type:chore"
-        - chore
-        - dependencies
-        - A-DevOps
+      labels: ["C-Chore", "C-Refactor", "A-DevOps", "dependencies"]
     - title: Other Changes
-      labels:
-        - "*"
+      labels: ["*"]
