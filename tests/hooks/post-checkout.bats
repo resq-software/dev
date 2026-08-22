@@ -27,7 +27,7 @@ teardown() {
 
 @test "post-checkout silent when no lockfile changed" {
     PREV=$(git -C "$REPO" rev-parse HEAD)
-    git -C "$REPO" commit --allow-empty -q -m "feat: nothing"
+    commit_no_hooks "$REPO" "feat: nothing"
     NEW=$(git -C "$REPO" rev-parse HEAD)
     run run_hook "$REPO" post-checkout "$PREV" "$NEW" 1
     [ "$status" -eq 0 ]
