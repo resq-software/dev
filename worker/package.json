@@ -40,5 +40,8 @@
     "@resq-systems/types": "0.2.0",
     "typescript": "7.0.2",
     "wrangler": "4.123.0"
+  },
+  "overrides": {
+    "sharp": "0.35.4"
   }
 }
