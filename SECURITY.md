@@ -4,7 +4,7 @@ This repository follows the ResQ organisation's [security policy](https://github
 
 ## Supported versions
 
-As the organisation policy's [supported-versions table](https://github.com/resq-software/.github/blob/main/SECURITY.md#supported-versions) sets out, security fixes go to the latest published version only. If you run an older one, upgrade before reporting; the issue may already be fixed.
+As the organisation policy's [supported-versions table](https://github.com/resq-software/.github/blob/main/SECURITY.md#supported-versions) sets out, security fixes go to the latest published version only. If you run an older one, please check whether the issue still affects the latest version, as it may already be fixed. Reports about older versions are still welcome; say which commit or release tag you tested.
 
 ## Reporting a vulnerability
 
