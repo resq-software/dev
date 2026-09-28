@@ -1,0 +1,31 @@
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependency licence check on pull requests. WARN-ONLY: a dependency under a
+# listed licence is reported as a warning in the job log and summary, and the
+# job still passes. It informs review; it does not block a merge.
+#
+# The org security-scan workflow called from security.yml already runs
+# dependency-review for vulnerabilities, but it takes no licence inputs, so the
+# licence check lives here. vulnerability-check is off so this job does not
+# repeat that one.
+
+name: dependency-licences
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  licence-check:
+    name: licence check (warn-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          vulnerability-check: false
+          deny-licenses: GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later, SSPL-1.0
+          warn-only: true

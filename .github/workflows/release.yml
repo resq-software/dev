@@ -42,8 +42,10 @@
 # NO CLOUDFLARE CREDENTIALS LIVE HERE. Deployment is Workers Builds pulling from
 # this repository; GitHub never holds a key that can touch the account.
 #
-# actions/checkout is the only third-party action, at the SHA already trusted
-# elsewhere in this repo.
+# actions/checkout is at the SHA already trusted elsewhere in this repo. The
+# publish job also uses anchore/sbom-action (an SPDX SBOM attached to the
+# Release) and actions/attest-build-provenance (provenance for every installer
+# listed in SHA256SUMS), each pinned to a full commit SHA.
 
 name: release
 
@@ -262,7 +264,12 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     permissions:
+      # Creating the Release and uploading SHA256SUMS and the SBOM to it.
       contents: write
+      # Build provenance: id-token signs the attestation through Sigstore, and
+      # attestations stores it against this repository.
+      id-token: write
+      attestations: write
     env:
       # Via env rather than inline `${{ }}` in the script body, so the value can
       # never be parsed as shell.
@@ -270,6 +277,13 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       TAG: ${{ needs.verify.outputs.tag }}
     steps:
+      # The released commit, for the SBOM below. Checked out first because
+      # checkout empties a non-repository workspace, which would take
+      # SHA256SUMS with it. Nothing here pushes, so no credential is kept.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Rebuild SHA256SUMS from the pin set
         run: |
           set -euo pipefail
@@ -325,6 +339,32 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" \
             --notes-file NOTES.md
+
+      # SPDX JSON SBOM of the released commit. Written to a file and uploaded
+      # below rather than by the action itself: its own release upload only
+      # works on `release` events, and this workflow runs on push.
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attach the SBOM to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # --clobber keeps a re-run idempotent, like the SHA256SUMS refresh above.
+        run: gh release upload "$TAG" sbom.spdx.json --repo "$GITHUB_REPOSITORY" --clobber
+
+      # Provenance for what users actually run: every installer listed in
+      # SHA256SUMS, by digest. Verify one with
+      #   gh attestation verify install.sh --repo resq-software/dev
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS
 
   bump:
     name: propose pin bump

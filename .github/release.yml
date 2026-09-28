@@ -3,7 +3,7 @@
 #
 # Categorizes the notes that `gh release create --generate-notes` produces
 # (grouping merged PRs by label into sections). Those categorized notes flow
-# into the resq-software/landing changelog aggregator, whose `kind` inference
+# into the org's changelog aggregator, whose `kind` inference
 # reads these section headers — so labeling PRs makes the changelog's
 # feature/fix/improvement classification accurate instead of a default guess.
 # Add the org's C-* category labels (C-Feature, C-Bug, C-Performance,
