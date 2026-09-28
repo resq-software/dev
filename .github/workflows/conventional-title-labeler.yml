@@ -4,7 +4,7 @@
 # Applies the org C-* change-type label (C-Feature / C-Bug / ...) to a PR based
 # on its conventional-commit title prefix. Combined with .github/release.yml,
 # this makes `gh release create --generate-notes` group PRs by type, which flows
-# into resq-software/landing's changelog aggregator so its feature/fix/kind
+# into the org's changelog aggregator so its feature/fix/kind
 # classification is automatic rather than a default guess. Path labels come from
 # .github/labeler.yml; this covers the change *type* that paths cannot express.
 name: Conventional Title Labeler
