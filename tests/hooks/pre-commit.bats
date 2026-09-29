@@ -16,13 +16,13 @@ teardown() {
     rm -rf "$REPO"
 }
 
-@test "soft-skip with hint when resq is missing" {
+@test "fail-closed with hint when resq is missing" {
     # Run with PATH that excludes any resq + override $HOME to a clean dir
     # so ~/.cargo/bin/resq isn't found either.
     EMPTY="$(mktemp -d)"
     PATH="/usr/bin:/bin" HOME="$EMPTY" run bash -c "cd '$REPO' && bash .git-hooks/pre-commit"
     rm -rf "$EMPTY"
-    [ "$status" -eq 0 ]
+    [ "$status" -ne 0 ]
     [[ "$output" == *"resq not found"* ]]
 }
 
@@ -34,7 +34,7 @@ teardown() {
     [[ "$output" != *"resq not found"* ]]
 }
 
-@test "dispatches to local-pre-commit even when resq is missing" {
+@test "refuses without dispatching local-pre-commit when resq is missing" {
     cat > "$REPO/.git-hooks/local-pre-commit" <<'EOF'
 #!/usr/bin/env bash
 echo "LOCAL_PRE_COMMIT_RAN"
@@ -43,6 +43,7 @@ EOF
     EMPTY="$(mktemp -d)"
     PATH="/usr/bin:/bin" HOME="$EMPTY" run bash -c "cd '$REPO' && bash .git-hooks/pre-commit"
     rm -rf "$EMPTY"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"LOCAL_PRE_COMMIT_RAN"* ]]
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"resq not found"* ]]
+    [[ "$output" != *"LOCAL_PRE_COMMIT_RAN"* ]]
 }
