@@ -44,7 +44,7 @@ concurrency:
 jobs:
   live:
     name: live endpoint matches main
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # Backstop only. The script enforces its own DEADLINE_MS (20 minutes) and
     # prints a diagnosis when it expires; this must stay comfortably above that
     # or the job is killed first and that diagnosis is lost. It exists so a
