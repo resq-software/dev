@@ -32,7 +32,7 @@ concurrency:
 jobs:
   shellcheck:
     name: shellcheck (install.sh + scripts)
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -443,7 +443,7 @@ jobs:
 
   powershell:
     name: PowerShell parse + analyze (*.ps1)
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -533,7 +533,7 @@ jobs:
 
   worker:
     name: worker (get.resq.software)
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -592,7 +592,7 @@ jobs:
     name: required
     needs: [shellcheck, powershell, worker]
     if: always()
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Gate on required checks
         run: |
