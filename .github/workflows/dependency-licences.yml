@@ -20,7 +20,7 @@ permissions: {}
 jobs:
   licence-check:
     name: licence check (warn-only)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted","linux","x64","zima"]') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
