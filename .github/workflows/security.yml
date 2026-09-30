@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Thin caller for the org-wide reusable security-scan workflow in
-# resq-software/.github. Update the `languages` list to match this repo's
-# primary code; everything else inherits.
+# resq-software/.github. Everything inherits from the reusable's defaults.
 
 name: security
 
@@ -34,7 +33,15 @@ jobs:
     if: ${{ github.actor != 'dependabot[bot]' }}
     uses: resq-software/.github/.github/workflows/security-scan.yml@44987ffd6eb5b1aa9d0a0d39e8dde9d669fe1d84 # main
     with:
-      languages: '["actions"]'
+      # No `languages:` on purpose — CodeQL on this repo is GitHub's code
+      # scanning DEFAULT SETUP, not this workflow. While both existed the
+      # reusable's CodeQL job ran, then had its upload refused:
+      #   "CodeQL analyses from advanced configurations cannot be processed
+      #    when the default setup is enabled"  (job status: configuration error)
+      # so every run threw its own results away. Omitting this input leaves it
+      # at the reusable's '[]' default, whose `if:` gate skips that job.
+      # Coverage is unchanged: default setup runs the `extended` query suite,
+      # which is broader than the default suite this workflow used.
       enable-semgrep: true
     # Forward only the named secrets the reusable workflow declares, instead
     # of `secrets: inherit` (which hands it ALL of this repo's secrets and
