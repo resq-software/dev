@@ -78,7 +78,11 @@ $resqMinHooksVersion = [version]'0.4.3'
 $resqTemplatesOk = $false
 if ($resqBin) {
     $resqVersion = $null
-    $versionLine = (& $resqBin --version 2>$null | Select-Object -First 1)
+    # A binary that cannot even launch (wrong architecture, corrupt file) throws
+    # under ErrorActionPreference=Stop; treat that as an unreadable version so
+    # the verified fallback runs instead of the installer aborting.
+    $versionLine = $null
+    try { $versionLine = (& $resqBin --version 2>$null | Select-Object -First 1) } catch { $versionLine = $null }
     if ("$versionLine" -match '^resq\S* v?(\d+\.\d+\.\d+)') { $resqVersion = [version]$Matches[1] }
     if ($resqVersion -and $resqVersion -ge $resqMinHooksVersion) {
         $resqTemplatesOk = $true
