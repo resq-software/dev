@@ -44,7 +44,10 @@ printf '%s\n' "$*" > "$CARGO_ARGV_OUT"
 STUB
     chmod +x "$_tmp/bin/cargo"
 
+    # XDG_CONFIG_HOME: the script writes an install receipt there, and must
+    # not touch the real one.
     CARGO_ARGV_OUT="$_tmp/argv" \
+    XDG_CONFIG_HOME="$_tmp/config" \
     PATH="$_tmp/bin:$PATH" \
     RESQ_FORCE_CARGO=1 \
     RESQ_INSTALL_DIR="$_tmp/dest" \

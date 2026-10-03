@@ -207,12 +207,18 @@ jobs:
           [ "$rc" -eq 0 ] || exit 1
           echo "ok - every source file carries the canonical header"
 
-      # The cargo fallback in install-resq.sh is not a rare path — it is the
-      # only one that runs, because crates publishes no resq-cli-v* release for
-      # resolve_tag to find. It must pin, and the unpinned form must require an
-      # explicit opt-out. Stubs cargo; compiles nothing, fetches nothing.
+      # The cargo fallback in install-resq.sh (unsupported hosts, releases
+      # without a binary for this platform, RESQ_FORCE_CARGO=1) must pin, and
+      # the unpinned form must require an explicit opt-out. Stubs cargo;
+      # compiles nothing, fetches nothing.
       - name: install-resq.sh pins its cargo fallback
         run: sh tests/installers/pinning.sh
+
+      # The release-binary path: highest stable tag, API errors are errors,
+      # exact-identity provenance, version check, staged install, receipt.
+      # Stubs curl/gh/cargo and runs each case under env -i with a scratch HOME.
+      - name: install-resq.sh release path verifies before it installs
+        run: sh tests/installers/release-path.sh
 
       - name: The pinned crates commits still exist upstream
         # A commit SHA cannot be repointed, which is the point of pinning — but

@@ -112,7 +112,7 @@ Each script can be run on its own without going through the full onboarding flow
 |---|---|---|
 | `install.sh` / `install.ps1` | Full onboarding — installs prereqs, clones a repo, sets up dev env + hooks | `curl -fsSL https://get.resq.software \| sh` |
 | `install-hooks.sh` / `install-hooks.ps1` | Drop the canonical git hooks into any repo. Asks to scaffold `local-pre-push` if `resq` is on PATH | `cd <repo> && curl -fsSL https://get.resq.software/hooks.sh \| sh` |
-| `install-resq.sh` | Install the `resq` CLI binary from the latest GitHub Release (SHA256-verified). Falls back to `cargo install --git --rev <pinned commit>` when no release asset matches — today that fallback is the only path, since no `resq-cli-v*` release exists yet | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
+| `install-resq.sh` | Install the `resq` CLI binary from the highest stable `resq-cli-v*` GitHub Release. Checked against `SHA256SUMS` and, when an authenticated `gh` 2.68+ is present, against its Sigstore build attestation (exact `release.yml@refs/tags/<tag>` signer, tagged commit on `master`); a failed check installs nothing. The new binary must report the tag's version before it replaces the old one (kept as `resq.prev`), and an install receipt is written to `${XDG_CONFIG_HOME:-~/.config}/resq/install.json`. Falls back to `cargo install --git --rev <pinned commit>` only for an unsupported host or a release without an asset for it; a GitHub API error stops the install rather than falling back | `curl -fsSL https://get.resq.software/resq.sh \| sh` |
 
 Every one of these is served pinned and hash-verified, and each has a
 version-locked form — `https://get.resq.software/v0.4.3/hooks.sh` and so on.
@@ -160,6 +160,14 @@ script has ever implemented it, so it silently did nothing.)
 `install.sh` additionally honours `REPO`, `RESQ_DIR`, `RESQ_BIN_DIR`,
 `SKIP_RESQ_CLI` and `NO_COLOR` — run `sh install.sh --help` for the current
 list.
+
+All three `resq` installers (`install.sh`, `install.ps1`, `install-resq.sh`)
+honour `RESQ_REQUIRE_PROVENANCE=1`: refuse the binary unless its Sigstore
+attestation was actually verified, instead of warning and trusting
+`SHA256SUMS` alone when `gh` is missing or older than 2.68.
+`install-resq.sh` also takes `RESQ_ALLOW_UNVERIFIED=1` to skip a check that
+cannot run (it never overrides one that ran and failed, and setting both is
+refused as a contradiction).
 
 ---
 
@@ -226,6 +234,7 @@ groups run on pull requests; the last runs after a deploy.
 | hook digests re-fetched from the pinned `crates` commit | a stale pin makes every fresh onboard fail a checksum |
 | pinned `crates` commits are ancestors of `master` | a rebased-away or mistyped SHA breaks `cargo install --rev` |
 | `install-resq.sh` pins its cargo fallback | an unpinned build of a moving branch, reached from `curl \| sh` |
+| `install-resq.sh` release path (stubbed curl/gh) | an API error read as "no release", the wrong tag picked, a failed attestation or wrong-version binary installed anyway |
 | Nix and Bun installer digests re-checked against the live URLs | upstream changing what we execute |
 | `stamp.sh --check` | a generated version or hook digest left unstamped |
 | `gen-pins` missing-PINS guard is reachable | the guard itself regressing, which has happened |
@@ -294,7 +303,7 @@ Precisely what that buys, since it is easy to overclaim:
 
 `required.yml` re-fetches all six from the pinned commit on every pull request and fails if the digests in either installer disagree — so a stale pin is a red check rather than a broken onboard.
 
-The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so updates roll out via `install-resq.sh` without editing every repo. That installer prefers a digest-verified release asset and otherwise builds from a pinned commit (`cargo install --git --rev`); an unpinned build of the default branch requires `RESQ_ALLOW_UNVERIFIED=1`.
+The hooks delegate logic back to the `resq` binary (`resq pre-commit`, etc.), so updates roll out via `install-resq.sh` without editing every repo. That installer prefers a release asset verified by digest and, where `gh` can check it, by build provenance, and otherwise builds from a pinned commit (`cargo install --git --rev`); an unpinned build of the default branch requires `RESQ_ALLOW_UNVERIFIED=1`.
 
 | Hook | What it gates |
 |---|---|

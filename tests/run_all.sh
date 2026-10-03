@@ -91,6 +91,10 @@ printf '\nResQ dev test suites\n\n'
 # Installer pinning. Stubs cargo; touches no network and no toolchain.
 run_suite "installers" "sh tests/installers/pinning.sh" '[0-9]+ passed, 0 failed'
 
+# install-resq.sh release path: tag choice, provenance, staging, receipt.
+# Stubs curl/gh/cargo; runs under env -i with a scratch HOME.
+run_suite "release-path" "sh tests/installers/release-path.sh" '[0-9]+ passed, 0 failed'
+
 # Library units: OS detection and package-manager selection, fully stubbed.
 run_suite "lib" "bash tests/lib/packages.sh" '[0-9]+ passed, 0 failed'
 

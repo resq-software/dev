@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 
 # GENERATED — stamped from VERSION by bin/stamp.sh. Do not edit by hand: CI
 # re-runs the stamper and fails if the committed value differs.
-$ScriptVersion  = '0.4.6'
+$ScriptVersion  = '0.4.7'
 $Org            = 'resq-software'
 # Pinned to a version rather than the rolling endpoint, and digest-checked
 # before it runs — mirrors install.sh. required.yml re-checks the digest against
@@ -498,14 +498,93 @@ function Initialize-Repo {
     }
 }
 
-# Install the `resq` binary from resq-software/crates GitHub Releases. Chooses
-# the archive for the current platform, verifies SHA256 against the release's
-# SHA256SUMS, and drops the binary into $env:RESQ_BIN_DIR (default:
+# Install the `resq` binary from resq-software/crates GitHub Releases. Picks
+# the highest stable resq-cli-vX.Y.Z, chooses the archive for the current
+# platform, verifies SHA256 against the release's SHA256SUMS and its Sigstore
+# build provenance, and drops the binary into $env:RESQ_BIN_DIR (default:
 # %LOCALAPPDATA%\Programs\resq\bin on Windows, ~/.local/bin on Unix).
 #
 # Idempotent: skips when the currently-installed `resq --version` matches the
-# latest release. Skip entirely with $env:SKIP_RESQ_CLI=1.
+# latest release. Skip entirely with $env:SKIP_RESQ_CLI=1. With
+# $env:RESQ_REQUIRE_PROVENANCE=1, a gh that cannot check provenance means no
+# install rather than a warning.
+#
+# Writes an install receipt to %APPDATA%\resq\install.json on Windows and
+# ${XDG_CONFIG_HOME:-~/.config}/resq/install.json elsewhere, same schema as
+# scripts/install-resq.sh.
 function Install-ResqCli {
+    # Runs gh and returns its exit code and output lines. Windows PowerShell 5.1
+    # turns redirected native stderr into error records, which the script-wide
+    # $ErrorActionPreference = 'Stop' makes terminating; this function's own
+    # scope lowers it so a gh failure is an exit code to check, not a throw.
+    # -MergeErr keeps stderr (to show why a check failed); otherwise it is
+    # dropped so the output is just the value asked for.
+    function Invoke-GhCapture {
+        param([string[]]$GhArgs, [switch]$MergeErr)
+        $ErrorActionPreference = 'Continue'
+        if (-not (Test-Command 'gh')) { return [pscustomobject]@{ Code = 127; Out = @() } }
+        if ($MergeErr) { $out = & gh @GhArgs 2>&1 } else { $out = & gh @GhArgs 2>$null }
+        $code = $LASTEXITCODE
+        [pscustomobject]@{ Code = $code; Out = @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) }
+    }
+
+    # The highest resq-cli-vX.Y.Z among $Tags by number, or $null. Anything
+    # else (another crate's tag, an -rc suffix) is ignored here as well as by
+    # the API filter, so a pre-release can never be picked.
+    function Select-ResqCliTag {
+        param([string[]]$Tags)
+        $best = $null
+        $bestVer = $null
+        foreach ($t in $Tags) {
+            $t = "$t".Trim()
+            if ($t -match '^resq-cli-v(\d{1,9})\.(\d{1,9})\.(\d{1,9})$') {
+                $v = New-Object System.Version -ArgumentList @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+                if ($null -eq $bestVer -or $v -gt $bestVer) { $bestVer = $v; $best = $t }
+            }
+        }
+        return $best
+    }
+
+    # Records what installed the binary and how. A background `resq self
+    # update` (resq-software/crates) is to replace only a binary whose receipt
+    # says "method": "release" for that exact path, so a cargo-, nix- or
+    # hand-built resq is never overwritten behind its owner's back. Written to a
+    # temp file and renamed into place; a receipt that cannot be written is a
+    # warning, never a failed install.
+    function Write-ResqReceipt {
+        param([string]$Ref, [string]$Path, [string]$Sha256, [string]$Provenance)
+        $rcDir = $null
+        $rcTmp = $null
+        try {
+            if ($IsNativeWindows) {
+                $rcDir = Join-Path $env:APPDATA 'resq'
+            } else {
+                $rcBase = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+                $rcDir = Join-Path $rcBase 'resq'
+            }
+            if (-not (Test-Path -LiteralPath $rcDir)) { New-Item -ItemType Directory -Path $rcDir -Force | Out-Null }
+            $receipt = [ordered]@{
+                schema       = 1
+                method       = 'release'
+                ref          = $Ref
+                path         = $Path
+                sha256       = $Sha256
+                provenance   = $Provenance
+                installed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+            }
+            $rcTmp = Join-Path $rcDir 'install.json.tmp'
+            # BOM-less UTF-8: 5.1's Set-Content -Encoding UTF8 writes a BOM,
+            # which strict JSON readers reject. .NET resolves a relative path
+            # against its own working directory, not $PWD, hence the full path.
+            $rcTmp = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($rcTmp)
+            [System.IO.File]::WriteAllText($rcTmp, ($receipt | ConvertTo-Json) + "`n", (New-Object System.Text.UTF8Encoding $false))
+            Move-Item -LiteralPath $rcTmp -Destination (Join-Path $rcDir 'install.json') -Force
+        } catch {
+            Write-Warn "Could not write the install receipt in $rcDir ($_)"
+            if ($rcTmp) { Remove-Item -LiteralPath $rcTmp -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     if ($env:SKIP_RESQ_CLI -eq '1') {
         Write-Info 'SKIP_RESQ_CLI=1 - skipping resq binary install'
         return
@@ -541,10 +620,18 @@ function Install-ResqCli {
         return
     }
 
-    # Find latest resq-cli-v* tag.
-    $tag = gh release list --repo "$Org/crates" --limit 40 --json tagName --jq '.[] | .tagName' 2>$null |
-           Where-Object { $_ -like 'resq-cli-v*' } |
-           Select-Object -First 1
+    # The highest stable resq-cli-vX.Y.Z by number. This used to take the first
+    # resq-cli-v* from `gh release list`, which is ordered by creation date;
+    # crates releases several crates at once, so that was the newest created,
+    # not the newest version, and could be a pre-release. A failed API call is
+    # reported as one rather than read as "no release exists".
+    $listing = Invoke-GhCapture -GhArgs @('api', "repos/$Org/crates/releases?per_page=100",
+        '--jq', '.[] | select((.prerelease|not) and (.draft|not)) | .tag_name')
+    if ($listing.Code -ne 0) {
+        Write-Warn "Could not list $Org/crates releases (gh api exited $($listing.Code)) - skipping binary install"
+        return
+    }
+    $tag = Select-ResqCliTag -Tags $listing.Out
     if (-not $tag) {
         Write-Warn "No resq-cli release found in $Org/crates - skipping binary install"
         return
@@ -552,7 +639,11 @@ function Install-ResqCli {
     $expectedVer = $tag -replace '^resq-cli-v', ''
 
     $binDir  = if ($env:RESQ_BIN_DIR) { $env:RESQ_BIN_DIR } else { $defaultBinDir }
+    # Absolute, because File.Replace below resolves a relative path against
+    # .NET's working directory rather than $PWD, and the receipt records it.
+    $binDir  = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($binDir)
     $binPath = Join-Path $binDir $binName
+    $prevPath = "$binPath.prev"
 
     if (Test-Path $binPath) {
         try {
@@ -567,6 +658,7 @@ function Install-ResqCli {
 
     Write-Info "Installing resq $expectedVer for $triple..."
     $tmp = New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())) -Force
+    $stagePath = $null
     try {
         $asset = "resq-cli-${tag}-${triple}.${ext}"
         gh release download $tag --repo "$Org/crates" --pattern $asset --pattern 'SHA256SUMS' --dir $tmp.FullName --clobber 2>$null
@@ -590,6 +682,61 @@ function Install-ResqCli {
             return
         }
 
+        # Verify build provenance. SHA256SUMS comes from the same release as the
+        # archive, so it proves only that the download is intact: anyone able
+        # to publish the release can publish matching sums. The Sigstore
+        # attestation proves who built it: release.yml in resq-software/crates,
+        # running at this tag, on a GitHub-hosted runner, from the commit the
+        # tag names, and that commit is on master. The signer is matched EXACTLY
+        # (--cert-identity); --signer-workflow would accept any workflow path
+        # with that prefix. A check that runs and fails means no install, like a
+        # checksum mismatch; a gh too old to check only warns, unless
+        # RESQ_REQUIRE_PROVENANCE=1. "Too old" is probed by the flag the check
+        # uses: gh 2.49-2.67 has `attestation verify` without --source-digest
+        # (added in 2.68.0), and there every check would fail a good release.
+        $provenance = 'unchecked'
+        $attestHelp = Invoke-GhCapture -MergeErr -GhArgs @('attestation', 'verify', '--help')
+        if ($attestHelp.Code -eq 0 -and ($attestHelp.Out -match '--source-digest')) {
+            Write-Info 'Verifying build provenance (Sigstore attestation)...'
+            # gh prints an API error body on stdout, so a failed call must not be
+            # read as a commit: require exit 0 and a 40-hex SHA.
+            $shaResult = Invoke-GhCapture -GhArgs @('api', "repos/$Org/crates/commits/$tag", '--jq', '.sha')
+            $tagSha = $null
+            if ($shaResult.Code -eq 0) { $tagSha = $shaResult.Out | Select-Object -First 1 }
+            if (-not ("$tagSha" -match '^[0-9a-f]{40}$')) {
+                Write-Warn "Could not resolve $tag to a commit to check its provenance - not installing"
+                return
+            }
+            $statusResult = Invoke-GhCapture -GhArgs @('api', "repos/$Org/crates/compare/master...$tagSha", '--jq', '.status')
+            $tagStatus = $null
+            if ($statusResult.Code -eq 0) { $tagStatus = $statusResult.Out | Select-Object -First 1 }
+            if ($tagStatus -notin @('identical', 'behind')) {
+                Write-Warn "$tag points at $tagSha, which is not on $Org/crates master ($(if ($tagStatus) { $tagStatus } else { 'unknown' })) - not installing a release built from unmerged code"
+                return
+            }
+            $attest = Invoke-GhCapture -MergeErr -GhArgs @('attestation', 'verify', $assetPath,
+                '--repo', "$Org/crates",
+                '--cert-identity', "https://github.com/$Org/crates/.github/workflows/release.yml@refs/tags/$tag",
+                '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
+                '--source-ref', "refs/tags/$tag",
+                '--source-digest', $tagSha,
+                '--deny-self-hosted-runners')
+            if ($attest.Code -ne 0) {
+                foreach ($line in $attest.Out) { Write-Host "      $line" }
+                Write-Warn "Build provenance verification FAILED for $asset ($tag) - not installing"
+                return
+            }
+            $provenance = 'verified'
+            Write-Ok "Provenance verified: built by release.yml at $tag ($tagSha)"
+        }
+        elseif ($env:RESQ_REQUIRE_PROVENANCE -eq '1') {
+            Write-Warn "RESQ_REQUIRE_PROVENANCE=1, but this gh cannot check provenance (needs 2.68+) - not installing"
+            return
+        }
+        else {
+            Write-Warn 'Build provenance NOT checked - needs gh 2.68+. Trusting SHA256SUMS alone.'
+        }
+
         # Extract. PowerShell ships Expand-Archive for .zip; tar.exe for .tar.gz
         # is native on Win10+ and on all Unix hosts.
         if ($ext -eq 'zip') {
@@ -609,12 +756,48 @@ function Install-ResqCli {
             return
         }
 
-        if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-        Copy-Item -Path $stagedBin.FullName -Destination $binPath -Force
+        # The new binary has to run and report the version the tag names before
+        # it may replace anything. It is then staged beside the target and
+        # swapped in by File.Replace, a rename, so an interrupted install never
+        # leaves a half-written resq; the binary it replaces is kept as
+        # $binName.prev.
         if (-not $IsNativeWindows -and (Test-Command 'chmod')) {
-            & chmod 0755 $binPath
+            & chmod 0755 $stagedBin.FullName
         }
+        $newVersion = & {
+            $ErrorActionPreference = 'Continue'
+            try { & $stagedBin.FullName --version 2>$null | Select-Object -First 1 } catch { '' }
+        }
+        $newVersion = "$newVersion".Trim()
+        if ($newVersion -notmatch ('\sv?' + [regex]::Escape($expectedVer) + '$')) {
+            Write-Warn "$asset reports '$(if ($newVersion) { $newVersion } else { 'nothing' })' for --version, not $expectedVer - not installing"
+            return
+        }
+
+        if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+        $stagePath = Join-Path $binDir (".$binName.new." + [System.Guid]::NewGuid().ToString('N').Substring(0, 8))
+        Copy-Item -LiteralPath $stagedBin.FullName -Destination $stagePath -Force
+        if (-not $IsNativeWindows -and (Test-Command 'chmod')) {
+            & chmod 0755 $stagePath
+        }
+        try {
+            if (Test-Path -LiteralPath $binPath) {
+                Remove-Item -LiteralPath $prevPath -Force -ErrorAction SilentlyContinue
+                [System.IO.File]::Replace($stagePath, $binPath, $prevPath, $true)
+            } else {
+                Move-Item -LiteralPath $stagePath -Destination $binPath
+            }
+        } catch {
+            # On Windows, most likely a resq.exe that is running right now.
+            Write-Warn "Could not replace $binPath ($($_.Exception.Message)) - not installing"
+            return
+        }
+        $stagePath = $null
         Write-Ok "Installed $binPath"
+
+        $installedSha = ''
+        try { $installedSha = (Get-FileHash -LiteralPath $binPath -Algorithm SHA256).Hash.ToLower() } catch { $installedSha = '' }
+        Write-ResqReceipt -Ref $tag -Path $binPath -Sha256 $installedSha -Provenance $provenance
 
         # PATH hint.
         $pathSep = if ($IsNativeWindows) { ';' } else { ':' }
@@ -629,6 +812,7 @@ function Install-ResqCli {
         Install-ResqCompletions -BinPath $binPath
     }
     finally {
+        if ($stagePath) { Remove-Item -LiteralPath $stagePath -Force -ErrorAction SilentlyContinue }
         Remove-Item -Recurse -Force $tmp.FullName -ErrorAction SilentlyContinue
     }
 }
