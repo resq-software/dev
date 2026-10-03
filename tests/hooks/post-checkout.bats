@@ -27,6 +27,9 @@ teardown() {
 
 @test "post-checkout silent when no lockfile changed" {
     PREV=$(git -C "$REPO" rev-parse HEAD)
+    # Must not fire the installed hooks: on a machine that has a real `resq`
+    # this setup commit would run the full pre-commit suite (and fail on the
+    # security audit). Passes in CI only because CI has no resq binary.
     commit_no_hooks "$REPO" "feat: nothing"
     NEW=$(git -C "$REPO" rev-parse HEAD)
     run run_hook "$REPO" post-checkout "$PREV" "$NEW" 1

@@ -23,7 +23,6 @@
 #
 # Env:
 #     RESQ_CRATES_REF          — git ref for raw fallback (default: master)
-#     GIT_HOOKS_SKIP           — set to skip installation entirely
 #     YES=1                    — auto-accept the local-hook scaffold prompt
 #     RESQ_SKIP_LOCAL_SCAFFOLD — set to opt out of the local-hook prompt
 
@@ -78,16 +77,16 @@ else
     # Pinned commit in resq-software/crates. Update this and the digests below
     # together; .github/workflows/required.yml re-checks them against the live
     # endpoint, so a stale or mistyped pin fails CI rather than a user's install.
-    CRATES_COMMIT="d84cd9613da685ffb772a766673d6ba6a4acaf31"
+    CRATES_COMMIT="72e0ae4952624ccd5cf39adc632e15b3d91b86c9"
 
     hook_digest() {
         case "$1" in
-            pre-commit)         echo "540c19f96fe258df6d90a8357b27513657b380567650ce3aaed83efa216a64ee" ;;
-            commit-msg)         echo "e7fa95d5d54f212ef145ae9d53cae08b24b0f9dbd5501fde1dae0aa4ddfeb2a6" ;;
+            pre-commit)         echo "fd2d275571d431a8cb897a047176f0da9a096ef76a111a0ef0147bb10ba83ffc" ;;
+            commit-msg)         echo "d33ecc52661d43aabaeae1d789df04c709ece41e37fd224b6940c7639ac2a6ef" ;;
             prepare-commit-msg) echo "4fa2e7abf284adc93da750b9c4387de781dd552874290c81885c5dc19debe99b" ;;
-            pre-push)           echo "85677f87b30220a443e00191e8267998f62c83642127311c72efe841aab72c79" ;;
-            post-checkout)      echo "2a894cf301bd487494d57f39159de07b79f608beeece349de5a4bdc0b5a11480" ;;
-            post-merge)         echo "b05e2ecacb5c342b3fc3525987ad73dc700079bfe7fd5bf7eac67461ea77cfbb" ;;
+            pre-push)           echo "84f1d08fa54baa592d5cc3519ac85cba69d59bc1d502ca8d821cb8f30dde53ce" ;;
+            post-checkout)      echo "aeacd20d8d42d75586f147f8cf92d5ae68eb0e7c9fbe99f7cd1838904f943180" ;;
+            post-merge)         echo "32d3e73e5b894b7a42c21075192262997e7a953b84a18f89901cf579a431ab2c" ;;
             *)                  echo "" ;;
         esac
     }
@@ -194,12 +193,27 @@ fi
 
 printf '  ok  ResQ hooks installed in %s\n' "$HOOKS_DIR" >&2
 printf '      Bypass once:        git commit --no-verify\n' >&2
-printf '      Disable all hooks:  export GIT_HOOKS_SKIP=1\n' >&2
+printf '      Skip one check:     export GIT_HOOKS_SKIP=audit   (or format, versioning,\n' >&2
+printf '                          msg-format, wip-guard, force-push, branch-name, notify,\n' >&2
+printf '                          local — comma-separate to combine)\n' >&2
+printf '      Disable ALL checks: export GIT_HOOKS_SKIP=all\n' >&2
+printf '                          GIT_HOOKS_SKIP is a list of check names, not a boolean.\n' >&2
+printf '                          An unrecognised value fails closed, and every skip is\n' >&2
+printf '                          announced — if you saw no banner, nothing was skipped.\n' >&2
+printf '                          The secret scan has no token; only the all-off value\n' >&2
+printf '                          (all/1/true/yes/on) or --no-verify disables it.\n' >&2
+printf '                          prepare-commit-msg ignores GIT_HOOKS_SKIP entirely.\n' >&2
 printf '      Add repo logic:     %s/local-<hook-name>\n' "$HOOKS_DIR" >&2
 
 if [ -z "$RESQ_BIN" ]; then
-    printf 'warn  resq backend not found. Hooks will soft-skip until you install it:\n' >&2
+    # The installed pre-commit fails closed without resq: it refuses the commit
+    # rather than let an unscanned change through. Saying "soft-skip" here
+    # (true of hooks before resq-software/crates#206) told a first-time user
+    # their commits would pass while every one was refused.
+    printf 'warn  resq backend not found. Until it is installed, pre-commit REFUSES every\n' >&2
+    printf '      commit (no checks can run, so none are waived). Install it:\n' >&2
     printf '      curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-resq.sh | sh\n' >&2
+    printf '      To commit without it on purpose: GIT_HOOKS_SKIP=all, or git commit --no-verify.\n' >&2
     exit 0
 fi
 

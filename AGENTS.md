@@ -161,8 +161,11 @@ its canonical checks. Commit `local-*` files in the repo needing extras (e.g.
 `local-pre-push` running `cargo check`). The canonical hooks themselves are
 managed by `install-hooks.sh` and should not be hand-edited.
 
-**`resq` backend**: hooks soft-skip with an informative warning if `resq` is
-not on PATH. Provide it either via your repo's `flake.nix` (recommended — add
+**`resq` backend**: `pre-commit` **fails closed** if `resq` is not on PATH —
+it refuses the commit and lists every check that could not run, because an
+unscanned change must not pass by default. (Hooks before
+resq-software/crates#206 soft-skipped instead.) To commit without it on purpose,
+use `GIT_HOOKS_SKIP=all` or `--no-verify`. Provide it either via your repo's `flake.nix` (recommended — add
 `resq-software/crates` as an input and include the `resq` package in
 `devPackages`) or globally:
 
@@ -170,7 +173,53 @@ not on PATH. Provide it either via your repo's `flake.nix` (recommended — add
 cargo install --git https://github.com/resq-software/crates resq-cli
 ```
 
-**Bypass**: `git commit --no-verify`, `git push --no-verify`, or
-`GIT_HOOKS_SKIP=1` in the environment to disable all hooks for a session.
+**Bypass**: `git commit --no-verify` / `git push --no-verify` skips one
+invocation. `GIT_HOOKS_SKIP` skips named checks for a session.
+
+`GIT_HOOKS_SKIP` is a **list of check names, not a boolean**. Separate with
+commas, colons or spaces; case-insensitive.
+
+| Token | Skips |
+|---|---|
+| `all`, `1`, `true`, `yes`, `on` | **every check in every hook** except `prepare-commit-msg` |
+| `0`, `false`, `no`, `off`, `none` | nothing — explicit no-op |
+| `audit` / `format` / `versioning` | `pre-commit` steps |
+| `msg-format` / `wip-guard` | `commit-msg` checks |
+| `force-push` / `branch-name` | `pre-push` guards |
+| `notify` | `post-checkout`, `post-merge` lock-file notices |
+| `local` | the repo's `local-<hook>` override (not `local-prepare-commit-msg`) |
+
+**Exception:** `prepare-commit-msg` has no `GIT_HOOKS_SKIP` handling at the
+pinned crates commit. It always adds the ticket prefix and always dispatches to
+`local-prepare-commit-msg`, prints no banner, and gates nothing.
+
+```sh
+GIT_HOOKS_SKIP=audit git commit -m "..."       # audit off; secret scan still runs
+GIT_HOOKS_SKIP=audit,format git commit -m "..."
+```
+
+Three rules matter more than the token list:
+
+1. **A skip is announced, never silent.** Before running anything the hook
+   prints to stderr what it SKIPPED and what it is still RUNNING. Treat that
+   banner as the source of truth for what actually executed — if a check isn't
+   listed under `RUNNING`, do not report it as passed. When the value disables
+   nothing in that hook, the banner is a single line instead (`… is set but
+   disables nothing in <hook> — all checks ran`), and every check ran.
+2. **An unrecognized value fails closed.** `GIT_HOOKS_SKIP=asdf` does not mean
+   "skip everything"; gating hooks refuse to run and print the valid tokens.
+   The old guard was `[ -n "${GIT_HOOKS_SKIP:-}" ] && exit 0`, so any non-empty
+   value disabled the whole hook — a granular-looking `GIT_HOOKS_SKIP=audit`
+   silently turned off the secret scan as well. That is the bug this replaces.
+3. **The secret scan has no token.** It is the compensating control for
+   unlicensed GitHub Secret Protection, so it can only be disabled by the
+   all-off value (which says so loudly) or `--no-verify`. `GIT_HOOKS_SKIP=secrets`
+   is refused by name.
+
+The token vocabulary is global and byte-identical in every hook that parses it
+(all but `prepare-commit-msg`), so a value
+exported once for a shell session cannot mean different things in different
+hooks. A token owned by another hook is inert, not an error. Behaviour is
+pinned by `tests/hooks/git-hooks-skip.bats`.
 
 Sibling repos' `AGENTS.md` should link this section rather than duplicating it.
