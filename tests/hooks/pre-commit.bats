@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Copyright 2026 ResQ Systems, Inc.
 # SPDX-License-Identifier: Apache-2.0
-# Soft-skip + local dispatch behavior in the canonical pre-commit hook.
+# Fail-closed-without-resq + local dispatch behavior in the canonical
+# pre-commit hook.
 # (The full `resq pre-commit` checks are exercised by resq-cli's own tests;
 # here we verify wiring only.)
 
