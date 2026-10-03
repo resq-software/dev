@@ -175,40 +175,6 @@ jobs:
             fail(`after ${elapsedS()}s the live endpoint still serves v${live.version} @ ${String(live.commit).slice(0, 8)} while main declares v${local.version} @ ${local.commit.slice(0, 8)}. Nothing here says the served content is wrong — it says the deploy has not landed. Check Workers Builds first; re-run this if the build was simply slow.`);
           }
 
-          // HEAD must still report a usable content-length, checked against the
-          // real runtime rather than the Node harness. src/index.ts sets this
-          // header on HEAD only, reasoning that GET framing belongs to the
-          // platform — but workerd derives framing from the body, and a null
-          // body could plausibly yield content-length: 0 and overwrite what we
-          // set. That would make the comment in the source a lie, and the unit
-          // tests cannot notice, because they never run inside workerd.
-          {
-            const headRes = await fetch(`${ORIGIN}/install.sh`, {
-              method: "HEAD",
-              cache: "no-store",
-              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-            });
-            // Status first, or the diagnosis lies. A 502 carries no
-            // content-length, so without this the check below reports a missing
-            // header and sends whoever reads it hunting for a header bug, when
-            // the endpoint is in fact refusing to serve.
-            if (!headRes.ok) fail(`HEAD /install.sh returned HTTP ${headRes.status}`);
-            const declared = Number(headRes.headers.get("content-length"));
-            const bodyRes = await fetch(`${ORIGIN}/install.sh`, {
-              cache: "no-store",
-              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-            });
-            if (!bodyRes.ok) fail(`GET /install.sh returned HTTP ${bodyRes.status}`);
-            const actual = (await bodyRes.arrayBuffer()).byteLength;
-            if (!Number.isFinite(declared) || declared <= 0) {
-              fail(`HEAD /install.sh reported content-length "${headRes.headers.get("content-length")}"; the source promises HEAD carries a real length`);
-            }
-            if (declared !== actual) {
-              fail(`HEAD /install.sh declares ${declared} bytes but GET returns ${actual}`);
-            }
-            console.log(`  HEAD content-length ${declared} matches the body`);
-          }
-
           // Every advertised digest must agree, not only install.sh: a partial
           // deploy could update one artifact and not another.
           for (const [name, meta] of Object.entries(local.artifacts)) {
@@ -218,41 +184,133 @@ jobs:
             }
           }
 
-          // The manifest is a claim. This is the part that checks the claim, and
-          // it does so for every published route — checking only install.sh
-          // would miss a partial deploy in which the installer is correct but
-          // hooks.sh or install.ps1 is stale, and those are executed too.
-          let verified = 0;
-          for (const [route, meta] of Object.entries(local.artifacts)) {
-            if (!meta.sha256) continue;
-            // Same reasoning as the poll loop: an untimed fetch here would hang
-            // the job past any deadline the loop above enforced.
-            const res = await fetch(`${ORIGIN}/${route}`, {
-              cache: "no-store",
-              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-            });
-            if (!res.ok) fail(`${route} returned HTTP ${res.status}`);
-            const bytes = new Uint8Array(await res.arrayBuffer());
-            const got = await sha256(bytes);
-            const header = res.headers.get("x-resq-sha256");
+          // ── Content checks, converged like the manifest ────────────────────
+          //
+          // The manifest flipping to main's commit does not mean every edge
+          // serves it yet: a Workers deploy rolls out gradually, so for a while
+          // consecutive requests can reach the old version and the new one. The
+          // v0.4.7 deploy hit exactly that — the manifest read v0.4.7, the very
+          // next GET /install.sh returned v0.4.6's bytes, and this check failed
+          // a deploy that was fully live seconds later. A false alarm here costs
+          // the credibility the poll loop's comment is protecting.
+          //
+          // Every response carries x-resq-commit, which separates the two cases
+          // this must not confuse:
+          //   - stamped with another commit: rollout lag. Retry the whole pass
+          //     until the deadline, then fail as "not landed everywhere";
+          //   - stamped with main's commit (or not stamped) but wrong: a wrong
+          //     deploy. Fail at once; waiting cannot fix it.
+          const commitOf = (res) => res.headers.get("x-resq-commit");
+          // Same reasoning as the poll loop: an untimed fetch would hang the job
+          // past any deadline the loop enforces.
+          const get = (path, init = {}) =>
+            fetch(`${ORIGIN}/${path}`, { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), ...init });
+          // A description of the lag, or null when `res` came from main's deploy.
+          const lagOf = async (res, what) => {
+            const c = commitOf(res);
+            if (!c) fail(`${what} carries no x-resq-commit header, so what it serves cannot be attributed to a deploy`);
+            if (c === local.commit) return null;
+            await res.arrayBuffer().catch(() => {});
+            return `${what} still served by ${c.slice(0, 8)}`;
+          };
 
-            if (got !== meta.sha256) fail(`${route}: served bytes hash to ${got}, expected ${meta.sha256}`);
-            if (header !== meta.sha256) fail(`${route}: x-resq-sha256 is ${header}, expected ${meta.sha256}`);
-            if (bytes.byteLength === 0) fail(`${route}: served an empty body`);
-            verified++;
-            console.log(`  ${route.padEnd(14)} ${got.slice(0, 12)} ok`);
+          // One pass over everything served. Returns { lag } when part of it is
+          // still the previous deploy, { verified, lines } when all of it is
+          // main's and correct; calls fail() for anything wrong rather than late.
+          async function verifyOnce() {
+            const lines = [];
+
+            // HEAD must still report a usable content-length, checked against
+            // the real runtime rather than the Node harness. src/index.ts sets
+            // this header on HEAD only, reasoning that GET framing belongs to
+            // the platform — but workerd derives framing from the body, and a
+            // null body could plausibly yield content-length: 0 and overwrite
+            // what we set. That would make the comment in the source a lie, and
+            // the unit tests cannot notice, because they never run inside
+            // workerd. Both requests must come from main's deploy, or the
+            // lengths of two different versions get compared.
+            const headRes = await get("install.sh", { method: "HEAD" });
+            // Status first, or the diagnosis lies. A 502 carries no
+            // content-length, so without this the check below reports a missing
+            // header and sends whoever reads it hunting for a header bug, when
+            // the endpoint is in fact refusing to serve.
+            if (!headRes.ok) fail(`HEAD /install.sh returned HTTP ${headRes.status}`);
+            const bodyRes = await get("install.sh");
+            if (!bodyRes.ok) fail(`GET /install.sh returned HTTP ${bodyRes.status}`);
+            const lag = (await lagOf(headRes, "HEAD /install.sh")) || (await lagOf(bodyRes, "GET /install.sh"));
+            if (lag) return { lag };
+            const declared = Number(headRes.headers.get("content-length"));
+            const actual = (await bodyRes.arrayBuffer()).byteLength;
+            if (!Number.isFinite(declared) || declared <= 0) {
+              fail(`HEAD /install.sh reported content-length "${headRes.headers.get("content-length")}"; the source promises HEAD carries a real length`);
+            }
+            if (declared !== actual) {
+              fail(`HEAD /install.sh declares ${declared} bytes but GET returns ${actual}`);
+            }
+            lines.push(`  HEAD content-length ${declared} matches the body`);
+
+            // The manifest is a claim. This is the part that checks the claim,
+            // and it does so for every published route — checking only
+            // install.sh would miss a partial deploy in which the installer is
+            // correct but hooks.sh or install.ps1 is stale, and those are
+            // executed too.
+            let verified = 0;
+            for (const [route, meta] of Object.entries(local.artifacts)) {
+              if (!meta.sha256) continue;
+              const res = await get(route);
+              if (!res.ok) fail(`${route} returned HTTP ${res.status}`);
+              const routeLag = await lagOf(res, route);
+              if (routeLag) return { lag: routeLag };
+              const bytes = new Uint8Array(await res.arrayBuffer());
+              const got = await sha256(bytes);
+              const header = res.headers.get("x-resq-sha256");
+
+              if (got !== meta.sha256) fail(`${route}: served bytes hash to ${got}, expected ${meta.sha256}`);
+              if (header !== meta.sha256) fail(`${route}: x-resq-sha256 is ${header}, expected ${meta.sha256}`);
+              if (bytes.byteLength === 0) fail(`${route}: served an empty body`);
+              verified++;
+              lines.push(`  ${route.padEnd(14)} ${got.slice(0, 12)} ok`);
+            }
+            if (verified === 0) fail("no artifacts were verified — the manifest advertised none");
+
+            // Sanity-check the shape of the thing people actually pipe to a
+            // shell, so a 200 carrying an HTML error page cannot pass as an
+            // installer.
+            const shRes = await get("");
+            if (!shRes.ok) fail(`the root route returned HTTP ${shRes.status}`);
+            const rootLag = await lagOf(shRes, "the root route");
+            if (rootLag) return { lag: rootLag };
+            const shBody = new Uint8Array(await shRes.arrayBuffer());
+            if (!new TextDecoder().decode(shBody.slice(0, 9)).startsWith("#!/bin/sh")) {
+              fail("the root route does not serve something that looks like the installer");
+            }
+            if (await sha256(shBody) !== want) fail("the root route and /install.sh disagree");
+
+            return { verified, lines };
           }
 
-          if (verified === 0) fail("no artifacts were verified — the manifest advertised none");
-
-          // Sanity-check the shape of the thing people actually pipe to a shell,
-          // so a 200 carrying an HTML error page cannot pass as an installer.
-          const shRes = await fetch(`${ORIGIN}/`, { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-          const shBody = new Uint8Array(await shRes.arrayBuffer());
-          if (!new TextDecoder().decode(shBody.slice(0, 9)).startsWith("#!/bin/sh")) {
-            fail("the root route does not serve something that looks like the installer");
+          // Retried within the same deadline as the manifest poll. A request
+          // that throws (timeout, reset) is treated as lag, not as a verdict.
+          let pass = 0;
+          let result = null;
+          for (;;) {
+            pass++;
+            let lag;
+            try {
+              result = await verifyOnce();
+              lag = result.lag;
+            } catch (e) {
+              lag = `request failed: ${e.message}`;
+            }
+            if (!lag) break;
+            const left = remaining();
+            if (left <= 0) {
+              fail(`after ${elapsedS()}s the deploy has still not reached every edge: ${lag}. The manifest already declares v${local.version} @ ${local.commit.slice(0, 8)}, and nothing served was wrong — part of it was late. Check Workers Builds first; re-run this if the rollout was simply slow.`);
+            }
+            console.log(`content pass ${pass}: ${lag}; retrying`);
+            await sleep(Math.min(POLL_MS, left));
           }
-          if (await sha256(shBody) !== want) fail("the root route and /install.sh disagree");
+          for (const line of result.lines) console.log(line);
 
-          console.log(`ok - ${ORIGIN} serves v${live.version} @ ${live.commit.slice(0, 8)}, ${verified} artifacts verified`);
+          console.log(`ok - ${ORIGIN} serves v${live.version} @ ${live.commit.slice(0, 8)}, ${result.verified} artifacts verified`);
           JS
