@@ -44,7 +44,7 @@ fi
 # install.sh keeps verifying against the digest it actually shipped with rather
 # than against whatever happens to be current. release.yml refuses to publish a
 # tag whose version disagrees with this value.
-SCRIPT_VERSION="0.4.6"
+SCRIPT_VERSION="0.4.7"
 
 # Everything this script creates belongs to the invoking user alone. Set before
 # the first mkdir/mktemp so nothing is even briefly group- or world-readable.
@@ -575,9 +575,19 @@ post_clone_setup() {
 
 # Install the `resq` binary from resq-software/crates GitHub Releases. Chooses
 # the tar.gz for the current $OS/$ARCH, verifies SHA256 against the release's
-# SHA256SUMS, and drops the binary into $RESQ_BIN_DIR (default ~/.local/bin).
-# Idempotent: skips when the currently-installed `resq --version` matches the
-# latest release. Skip entirely with SKIP_RESQ_CLI=1.
+# SHA256SUMS and its build provenance against the Sigstore attestation, and
+# drops the binary into $RESQ_BIN_DIR (default ~/.local/bin). Idempotent: skips
+# when the currently-installed `resq --version` matches the latest release.
+# Skip entirely with SKIP_RESQ_CLI=1.
+#
+# Every failure here warns and returns without installing rather than aborting
+# the onboarding: the resq binary is a convenience, the clone is the point.
+#
+# Writes an install receipt to ${XDG_CONFIG_HOME:-$HOME/.config}/resq/install.json
+# in the same schema as scripts/install-resq.sh. A background `resq self update`
+# replaces only a binary whose receipt says "method": "release" for that exact
+# path, so a cargo-, nix- or hand-built resq is never overwritten behind its
+# owner's back.
 install_resq_cli() {
   if [ "${SKIP_RESQ_CLI:-0}" = "1" ]; then
     info "SKIP_RESQ_CLI=1 — skipping resq binary install"
@@ -595,14 +605,25 @@ install_resq_cli() {
       ;;
   esac
 
-  _tag="$(gh release list --repo "$ORG/crates" --limit 40 \
-    --json tagName --jq '.[] | .tagName' 2>/dev/null \
-    | grep -m1 '^resq-cli-v' || true)"
-  if [ -z "$_tag" ]; then
-    warn "No resq-cli release found in $ORG/crates — skipping binary install"
+  # The highest stable resq-cli-vX.Y.Z by number. This used to take the first
+  # resq-cli-v* that `gh release list` printed, but that list is ordered by
+  # creation date and crates releases several crates at once, so the first
+  # match was the newest-created, not the newest version — and it could be a
+  # pre-release. The API call is captured on its own so that a failed request
+  # (network, auth, rate limit) is reported as that, not as "no release".
+  if ! _releases="$(gh api "repos/$ORG/crates/releases?per_page=100" \
+        --jq '.[] | select((.prerelease | not) and (.draft | not)) | .tag_name' 2>/dev/null)"; then
+    warn "Could not list releases in $ORG/crates (GitHub API request failed) — skipping binary install"
     return 0
   fi
-  _expected_ver="$(echo "$_tag" | sed 's/^resq-cli-v//')"
+  _expected_ver="$(printf '%s\n' "$_releases" \
+    | sed -n 's/^resq-cli-v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' \
+    | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+  if [ -z "$_expected_ver" ]; then
+    warn "No stable resq-cli release found in $ORG/crates — skipping binary install"
+    return 0
+  fi
+  _tag="resq-cli-v$_expected_ver"
 
   _bin_dir="${RESQ_BIN_DIR:-$HOME/.local/bin}"
   _bin_path="$_bin_dir/resq"
@@ -644,6 +665,54 @@ install_resq_cli() {
     return 0
   fi
 
+  # Verify build provenance. SHA256SUMS comes from the same release as the
+  # archive, so it proves only that the download is intact — anyone able to
+  # publish the release can publish matching sums. The Sigstore attestation
+  # proves who built it: release.yml in $ORG/crates, running at this tag, on a
+  # GitHub-hosted runner, from the commit the tag names, and that commit is on
+  # master. The signer is matched EXACTLY (--cert-identity); --signer-workflow
+  # would accept any workflow path with that prefix.
+  #
+  # gh is already authenticated by this point; it needs `attestation verify`
+  # with --source-ref/--source-digest (2.68+). Probed by the flag, not the
+  # subcommand: 2.49-2.67 has the subcommand without them, and there every check
+  # would "fail" and refuse a good release. Without it the install continues on
+  # the checksum alone and says so; RESQ_REQUIRE_PROVENANCE=1 makes that a
+  # refusal. A check that RUNS and FAILS always refuses, like a checksum mismatch.
+  _provenance="unchecked"
+  if gh attestation verify --help 2>&1 | grep -q -- '--source-digest'; then
+    info "Verifying build provenance (Sigstore attestation)..."
+    _tag_sha="$(gh api "repos/$ORG/crates/commits/$_tag" --jq .sha 2>/dev/null)" || _tag_sha=""
+    if [ -z "$_tag_sha" ]; then
+      warn "Could not resolve $_tag to a commit to check its provenance — not installing"
+      return 0
+    fi
+    _tag_status="$(gh api "repos/$ORG/crates/compare/master...$_tag_sha" --jq .status 2>/dev/null)" || _tag_status=""
+    case "$_tag_status" in
+      identical|behind) ;;
+      *)
+        warn "$_tag points at $_tag_sha, which is not on $ORG/crates master (${_tag_status:-unknown}) — not installing a release built from unmerged code"
+        return 0
+        ;;
+    esac
+    if ! _attest_out="$(gh attestation verify "$_tmp/$_asset" --repo "$ORG/crates" \
+          --cert-identity "https://github.com/$ORG/crates/.github/workflows/release.yml@refs/tags/$_tag" \
+          --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+          --source-ref "refs/tags/$_tag" --source-digest "$_tag_sha" \
+          --deny-self-hosted-runners 2>&1)"; then
+      printf '%s\n' "$_attest_out" >&2
+      warn "Build provenance verification FAILED for $_asset ($_tag) — not installing"
+      return 0
+    fi
+    _provenance="verified"
+    ok "Provenance verified: built by release.yml at $_tag ($(printf '%.12s' "$_tag_sha"))"
+  elif [ "${RESQ_REQUIRE_PROVENANCE:-0}" = "1" ]; then
+    warn "RESQ_REQUIRE_PROVENANCE=1, but this gh cannot check provenance (needs 2.68+) — not installing"
+    return 0
+  else
+    warn "Build provenance NOT checked — needs gh 2.68+. Trusting SHA256SUMS alone."
+  fi
+
   tar -xzf "$_tmp/$_asset" -C "$_tmp"
   # Locate the binary inside the extracted tree rather than assuming the
   # staging-dir layout. Matches the pattern already used by
@@ -655,9 +724,70 @@ install_resq_cli() {
     return 0
   fi
 
+  # The new binary has to run and report the version the tag names before it
+  # may replace anything — an archive holding some other build is caught here,
+  # not after the working copy is gone.
+  chmod 0755 "$_staging_bin"
+  _new_ver="$("$_staging_bin" --version 2>/dev/null | awk 'NR == 1')" || _new_ver=""
+  case "$_new_ver" in
+    *" $_expected_ver"|*" v$_expected_ver") ;;
+    *)
+      warn "$_asset reports '${_new_ver:-nothing}' for --version, not $_expected_ver — not installing"
+      return 0
+      ;;
+  esac
+
+  # Staged beside the target and renamed into place, so an interrupted install
+  # never leaves a half-written resq; the binary it replaces is kept as
+  # resq.prev. The staging file is registered with the cleanup trap, so an
+  # interrupt between here and the rename does not leave it behind either
+  # (after the rename the path no longer exists and cleanup is a no-op).
   mkdir -p "$_bin_dir"
-  install -m 0755 "$_staging_bin" "$_bin_path"
+  if ! _staged="$(mktemp "$_bin_dir/.resq.new.XXXXXX" 2>/dev/null)"; then
+    warn "Could not create a staging file in $_bin_dir — not installing"
+    return 0
+  fi
+  _TMP_PATHS="$_TMP_PATHS
+$_staged"
+  if ! install -m 0755 "$_staging_bin" "$_staged"; then
+    rm -f "$_staged"
+    warn "Could not stage the new binary in $_bin_dir — not installing"
+    return 0
+  fi
+  if [ -f "$_bin_path" ]; then
+    cp -p "$_bin_path" "$_bin_path.prev" \
+      || warn "Could not keep the previous binary as $_bin_path.prev"
+  fi
+  if ! mv -f "$_staged" "$_bin_path"; then
+    rm -f "$_staged"
+    warn "Could not move the new binary into place at $_bin_path — not installing"
+    return 0
+  fi
   ok "Installed $_bin_path"
+
+  # Install receipt, same schema as write_receipt in scripts/install-resq.sh.
+  # Written to a temp file and renamed, so a reader never sees half a receipt.
+  # A receipt that cannot be written is a warning, never a failed install.
+  _rc_dir="${XDG_CONFIG_HOME:-$HOME/.config}/resq"
+  _rc_sha="$(sha256_of "$_bin_path")" || _rc_sha=""
+  _rc_path="$(printf '%s' "$_bin_path" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  if mkdir -p "$_rc_dir" 2>/dev/null && {
+      printf '{\n'
+      printf '  "schema": 1,\n'
+      printf '  "method": "release",\n'
+      printf '  "ref": "%s",\n' "$_tag"
+      printf '  "path": "%s",\n' "$_rc_path"
+      printf '  "sha256": "%s",\n' "$_rc_sha"
+      printf '  "provenance": "%s",\n' "$_provenance"
+      printf '  "installed_at": "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '}\n'
+    } > "$_rc_dir/install.json.tmp" 2>/dev/null \
+    && mv -f "$_rc_dir/install.json.tmp" "$_rc_dir/install.json"; then
+    :
+  else
+    rm -f "$_rc_dir/install.json.tmp" 2>/dev/null || true
+    warn "Could not write the install receipt in $_rc_dir"
+  fi
 
   case ":$PATH:" in
     *":$_bin_dir:"*) ;;
@@ -754,6 +884,9 @@ Environment:
   RESQ_BIN_DIR=<p>   where to put the resq binary (default: \$HOME/.local/bin)
   YES=1              assume yes at confirmation prompts
   SKIP_RESQ_CLI=1    skip installing the resq binary
+  RESQ_REQUIRE_PROVENANCE=1
+                     install resq only if its build attestation was verified
+                     (needs gh 2.68+; otherwise SHA256SUMS alone, with a warning)
   NO_COLOR=1         disable ANSI colour
 
 Repositories:
