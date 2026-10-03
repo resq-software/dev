@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# Copyright 2026 ResQ Systems, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # The GIT_HOOKS_SKIP contract.
 #
 # Regression suite for the incident of 2026-08: an operator ran
