@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 
 # GENERATED — stamped from VERSION by bin/stamp.sh. Do not edit by hand: CI
 # re-runs the stamper and fails if the committed value differs.
-$ScriptVersion  = '0.4.5'
+$ScriptVersion  = '0.4.6'
 $Org            = 'resq-software'
 # Pinned to a version rather than the rolling endpoint, and digest-checked
 # before it runs — mirrors install.sh. required.yml re-checks the digest against
@@ -48,7 +48,7 @@ $DistBase       = 'https://get.resq.software'
 
 # GENERATED — SHA-256 of scripts/install-hooks.ps1 at this version, checked
 # before that file is ever executed. Stamped by bin/stamp.sh.
-$HooksSha256    = '816581068a9c0a2b88b799b3f081bdd4b1600840d10784d51ae2c8fb8ab1ccbc'
+$HooksSha256    = 'b80649d10eb1e18088142f3df23d168e448791e8f8ea1fca0d6dd4a84a5c3c20'
 
 # Canonical repo table — one source of truth for the menu, validation and the
 # post-install summary. Those used to be three separate lists that could

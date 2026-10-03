@@ -147,7 +147,10 @@ these digests as an integrity check, not proof of origin.
 
 Common env vars across all of them:
 - `YES=1` — skip prompts (CI / provisioning)
-- `GIT_HOOKS_SKIP=1` — disable installed hooks for a session
+- `GIT_HOOKS_SKIP=<tokens>` — skip named hook checks. **Not a boolean** — `1` (or
+  `all`) disables *every* check, while granular tokens like `audit` or
+  `audit,format` disable only those. An unrecognized value fails closed instead
+  of skipping, and every skip is announced. See [below](#bypassing-a-check)
 - `RESQ_SKIP_LOCAL_SCAFFOLD=1` — opt out of the `local-pre-push` scaffold prompt
 
 To pin a revision, use a version-locked URL rather than an environment
@@ -308,6 +311,38 @@ resq hooks scaffold-local --kind auto    # detects rust/python/node/dotnet/cpp/n
 ```
 
 `resq hooks doctor` reports drift, `resq hooks update` re-syncs from the embedded canonical, `resq hooks status` prints a one-line shell-friendly summary.
+
+#### Bypassing a check
+
+`GIT_HOOKS_SKIP` takes a **list of check names**, not a boolean. Separate them with commas, colons or spaces; case doesn't matter.
+
+| Value | Skips |
+|---|---|
+| `all`, `1`, `true`, `yes`, `on` | **Everything.** The whole hook is disabled (every hook but `prepare-commit-msg`) |
+| `0`, `false`, `no`, `off`, `none` | Nothing — an explicit no-op (under the old guard, `0` skipped *everything*) |
+| `audit` | `pre-commit` — security audit (osv-scanner / audit-ci) |
+| `format` | `pre-commit` — code formatters |
+| `versioning` | `pre-commit` — changeset / version prompt |
+| `msg-format` | `commit-msg` — Conventional Commits subject check |
+| `wip-guard` | `commit-msg` — `WIP:` / `fixup!` / `squash!` block on main |
+| `force-push` | `pre-push` — force-push guard on main/master |
+| `branch-name` | `pre-push` — branch naming convention |
+| `notify` | `post-checkout` / `post-merge` — lock-file drift notices |
+| `local` | any hook but `prepare-commit-msg` — the repo's `local-<hook-name>` override |
+
+```bash
+GIT_HOOKS_SKIP=audit git commit -m "chore: lockfile bump"   # audit off, secret scan still runs
+GIT_HOOKS_SKIP=audit,format git commit -m "..."             # both off
+```
+
+Three properties are deliberate, and worth knowing before you rely on this:
+
+- **Every skip is announced.** The hook prints, on stderr, what it skipped *and what it still ran*, before running anything. If you didn't see the banner, nothing was skipped. Don't record a check as passing that the banner didn't list under `RUNNING`. If the value disables nothing in that hook, the banner is one line saying so (`… disables nothing in <hook> — all checks ran`), and every check ran.
+- **`prepare-commit-msg` is the exception.** At the pinned crates commit it has no `GIT_HOOKS_SKIP` handling, so no token changes what it does. It does nothing for `-m`/`-F` messages, merges, squashes, `-c`/`-C`/`--amend`, or on a detached HEAD; otherwise it adds a ticket prefix when the branch name carries one and runs `local-prepare-commit-msg`, with no banner. It gates nothing.
+- **An unrecognized value fails closed.** `GIT_HOOKS_SKIP=asdf` does not mean "skip everything" — gating hooks refuse to run and print the valid tokens. This is the incident this design exists to prevent: the old guard was `[ -n "$GIT_HOOKS_SKIP" ] && exit 0`, so *any* non-empty value silently disabled the entire hook. A plausible-looking `GIT_HOOKS_SKIP=audit` turned off the secret scan too, with nothing on screen to say so.
+- **The secret scan has no token of its own.** It's the compensating control for not licensing GitHub Secret Protection, so it is reachable only through the all-off value — which shouts about it — or `git commit --no-verify`. `GIT_HOOKS_SKIP=secrets` is refused by name.
+
+To bypass a single invocation entirely, prefer git's own flag: `git commit --no-verify` / `git push --no-verify`.
 
 The canonical content lives in exactly one place: [`crates/resq-cli/templates/git-hooks/`](https://github.com/resq-software/crates/tree/master/crates/resq-cli/templates/git-hooks). The crates repo's own `.git-hooks/` (for dog-fooding) is kept identical via `hooks-sync.yml`. The `dev/` repo used to ship a third copy and was retired in Phase 4 — `install-hooks.sh` now fetches from the crates source (or lets `resq hooks install` do it offline). Bats + Rust integration tests cover the hook behavior end-to-end.
 

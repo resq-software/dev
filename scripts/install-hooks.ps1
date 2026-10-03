@@ -67,10 +67,37 @@ if ($onPath) {
     $resqBin = Join-Path $HOME '.cargo/bin/resq.exe'
 }
 
+# ── Is that resq new enough to supply the hooks? ────────────────────────────
+# Path 1 installs the templates EMBEDDED in the binary, so an old resq installs
+# old hooks. Before resq-cli 0.4.3 (resq-software/crates#206) they carried the
+# blanket GIT_HOOKS_SKIP guard, under which a granular-looking
+# GIT_HOOKS_SKIP=audit also disabled the secret scan. A binary below this
+# floor, or one whose version cannot be read, gets the pinned, digest-verified
+# templates from path 2 instead. Keep in step with install-hooks.sh.
+$resqMinHooksVersion = [version]'0.4.3'
+$resqTemplatesOk = $false
+if ($resqBin) {
+    $resqVersion = $null
+    # A binary that cannot even launch (wrong architecture, corrupt file) throws
+    # under ErrorActionPreference=Stop; treat that as an unreadable version so
+    # the verified fallback runs instead of the installer aborting.
+    $versionLine = $null
+    try { $versionLine = (& $resqBin --version 2>$null | Select-Object -First 1) } catch { $versionLine = $null }
+    if ("$versionLine" -match '^resq\S* v?(\d+\.\d+\.\d+)') { $resqVersion = [version]$Matches[1] }
+    if ($resqVersion -and $resqVersion -ge $resqMinHooksVersion) {
+        $resqTemplatesOk = $true
+    } else {
+        $shown = if ($resqVersion) { "$resqVersion" } else { '<unreadable>' }
+        Write-Host "warn  $resqBin reports version $shown; its embedded hooks predate the granular" -ForegroundColor Yellow
+        Write-Host "      GIT_HOOKS_SKIP fix (needs >= $resqMinHooksVersion). Installing the pinned, verified hooks" -ForegroundColor Yellow
+        Write-Host "      instead. Upgrade resq too - the new hooks may pass it flags it lacks." -ForegroundColor Yellow
+    }
+}
+
 # ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
 # Prefer the new `hooks install` path; fall back to `dev install-hooks`
 # for binaries built before resq-software/crates#60.
-if ($resqBin) {
+if ($resqTemplatesOk) {
     & $resqBin hooks install --help *> $null
     $installArgs = if ($LASTEXITCODE -eq 0) { @('hooks', 'install') } else { @('dev', 'install-hooks') }
     Write-Host "info  Installing hooks via $resqBin $($installArgs -join ' ')" -ForegroundColor Cyan
@@ -91,14 +118,14 @@ if ($resqBin) {
     # Pinned commit in resq-software/crates. Keep in step with the digests below
     # and with scripts/install-hooks.sh; required.yml re-checks all three
     # against the live endpoint, so drift fails CI rather than a user's install.
-    $cratesCommit = 'd84cd9613da685ffb772a766673d6ba6a4acaf31'
+    $cratesCommit = '72e0ae4952624ccd5cf39adc632e15b3d91b86c9'
     $hookDigests = @{
-        'pre-commit'         = '540c19f96fe258df6d90a8357b27513657b380567650ce3aaed83efa216a64ee'
-        'commit-msg'         = 'e7fa95d5d54f212ef145ae9d53cae08b24b0f9dbd5501fde1dae0aa4ddfeb2a6'
+        'pre-commit'         = 'fd2d275571d431a8cb897a047176f0da9a096ef76a111a0ef0147bb10ba83ffc'
+        'commit-msg'         = 'd33ecc52661d43aabaeae1d789df04c709ece41e37fd224b6940c7639ac2a6ef'
         'prepare-commit-msg' = '4fa2e7abf284adc93da750b9c4387de781dd552874290c81885c5dc19debe99b'
-        'pre-push'           = '85677f87b30220a443e00191e8267998f62c83642127311c72efe841aab72c79'
-        'post-checkout'      = '2a894cf301bd487494d57f39159de07b79f608beeece349de5a4bdc0b5a11480'
-        'post-merge'         = 'b05e2ecacb5c342b3fc3525987ad73dc700079bfe7fd5bf7eac67461ea77cfbb'
+        'pre-push'           = '84f1d08fa54baa592d5cc3519ac85cba69d59bc1d502ca8d821cb8f30dde53ce'
+        'post-checkout'      = 'aeacd20d8d42d75586f147f8cf92d5ae68eb0e7c9fbe99f7cd1838904f943180'
+        'post-merge'         = '32d3e73e5b894b7a42c21075192262997e7a953b84a18f89901cf579a431ab2c'
     }
 
     # -Ref still works, but pinned digests cannot describe an arbitrary ref, so
@@ -162,7 +189,16 @@ if ($resqBin) {
 
 Write-Host "  ok  ResQ hooks installed in $hooksDir" -ForegroundColor Green
 Write-Host "      Bypass once:        git commit --no-verify"
-Write-Host "      Disable all hooks:  `$env:GIT_HOOKS_SKIP = '1'"
+Write-Host "      Skip one check:     `$env:GIT_HOOKS_SKIP = 'audit'   (or format, versioning,"
+Write-Host "                          msg-format, wip-guard, force-push, branch-name, notify,"
+Write-Host "                          local - comma-separate to combine)"
+Write-Host "      Disable ALL checks: `$env:GIT_HOOKS_SKIP = 'all'"
+Write-Host "                          GIT_HOOKS_SKIP is a list of check names, not a boolean."
+Write-Host "                          An unrecognised value fails closed, and every skip is"
+Write-Host "                          announced - if you saw no banner, nothing was skipped."
+Write-Host "                          The secret scan has no token; only the all-off value"
+Write-Host "                          (all/1/true/yes/on) or --no-verify disables it."
+Write-Host "                          prepare-commit-msg ignores GIT_HOOKS_SKIP entirely."
 Write-Host "      Add repo logic:     $hooksDir/local-<hook-name>"
 
 # `return`, not `exit`. install.ps1 runs this file as a ScriptBlock
@@ -175,9 +211,12 @@ Write-Host "      Add repo logic:     $hooksDir/local-<hook-name>"
 # install. The common path therefore truncated the installer here — no resq
 # CLI, no completions, no "Ready!" banner, no next steps — and exited 0.
 if (-not $resqBin) {
-    Write-Host "warn  resq backend not found. Hooks will soft-skip until you install it:" -ForegroundColor Yellow
+    # The installed pre-commit fails closed without resq (see install-hooks.sh).
+    Write-Host "warn  resq backend not found. Until it is installed, pre-commit REFUSES every" -ForegroundColor Yellow
+    Write-Host "      commit (no checks can run, so none are waived). Install it:" -ForegroundColor Yellow
     Write-Host "      irm https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-resq.sh | sh"
     Write-Host "      (or) cargo install --git https://github.com/resq-software/crates resq-cli"
+    Write-Host "      To commit without it on purpose: `$env:GIT_HOOKS_SKIP = 'all', or git commit --no-verify."
     return
 }
 

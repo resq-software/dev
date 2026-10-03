@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Run the bats suite over the canonical git hooks. The hook templates live
-# in resq-software/crates; the suite fetches them at bats init time and
-# tests behavior (here-string safety, local-* dispatch, stdin propagation,
+# in resq-software/crates; the suite fetches them at bats init time — from the
+# commit scripts/install-hooks.sh pins, so it tests what users are installed —
+# and tests behavior (here-string safety, local-* dispatch, stdin propagation,
 # GIT_HOOKS_SKIP, etc).
 
 name: hooks-tests
@@ -49,3 +50,26 @@ jobs:
       - name: Print bats version (diagnostic)
         if: always()
         run: bats --version
+
+  # The job above tests the crates commit install-hooks.sh pins — what users
+  # actually get. This one tests crates master, so a template change that will
+  # break the suite shows up before the next pin bump rather than during it.
+  # Schedule/dispatch only: upstream drift is not something a dev PR can fix.
+  bats-upstream:
+    name: bats (crates master)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install bats
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y bats
+
+      - name: Run hook test suite against crates master
+        env:
+          RESQ_HOOK_REF: master
+        run: bats tests/hooks/

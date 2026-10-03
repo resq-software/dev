@@ -44,7 +44,7 @@ fi
 # install.sh keeps verifying against the digest it actually shipped with rather
 # than against whatever happens to be current. release.yml refuses to publish a
 # tag whose version disagrees with this value.
-SCRIPT_VERSION="0.4.5"
+SCRIPT_VERSION="0.4.6"
 
 # Everything this script creates belongs to the invoking user alone. Set before
 # the first mkdir/mktemp so nothing is even briefly group- or world-readable.
@@ -86,7 +86,7 @@ DIST_BASE="https://get.resq.software"
 # the hook installer. A compromised endpoint still cannot get code past it.
 # Regenerate with:
 #   git cat-file blob "$(git rev-parse "v$SCRIPT_VERSION"):scripts/install-hooks.sh" | sha256sum
-HOOKS_SHA256="c5aa6c94eca52d384d6c7a78c786aecdeaf8f76d69db908d5d2439ba31859065"
+HOOKS_SHA256="9e1afcf2858351ef180bf63c29c23769294c29ebf3f886f037cef9193d868488"
 
 # Canonical repo table — one source of truth for the menu, REPO validation, and
 # the post-install summary. Those used to be three separate lists that could
