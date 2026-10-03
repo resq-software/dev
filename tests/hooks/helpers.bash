@@ -66,8 +66,10 @@ _hook_cache_valid() {
 
 _ensure_hook_cache() {
     _hook_cache_valid && return 0
-    if [ -n "${RESQ_HOOK_SRC_DIR:-}" ] && [ -e "$RESQ_HOOK_SRC_DIR/pre-commit" ]; then
-        echo "helpers.bash: RESQ_HOOK_SRC_DIR=$RESQ_HOOK_SRC_DIR is missing some of: $HOOK_NAMES" >&2
+    # Never fetch into a user-supplied template dir: it may hold unpushed edits
+    # to the hooks that ARE present, and the fetch would overwrite them.
+    if [ -n "${RESQ_HOOK_SRC_DIR:-}" ]; then
+        echo "helpers.bash: RESQ_HOOK_SRC_DIR=$RESQ_HOOK_SRC_DIR must contain all of: $HOOK_NAMES" >&2
         return 1
     fi
     mkdir -p "$HOOK_SRC_CACHE"

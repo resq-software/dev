@@ -47,10 +47,48 @@ elif [ -x "$HOME/.cargo/bin/resq" ]; then
     RESQ_BIN="$HOME/.cargo/bin/resq"
 fi
 
+# ── Is that resq new enough to supply the hooks? ────────────────────────────
+# Path 1 installs the templates EMBEDDED in the binary, so an old resq installs
+# old hooks. Before resq-cli 0.4.3 (resq-software/crates#206) they carried the
+# blanket `[ -n "$GIT_HOOKS_SKIP" ] && exit 0` guard, under which a
+# granular-looking GIT_HOOKS_SKIP=audit also disabled the secret scan. A binary
+# below this floor, or one whose version cannot be read, gets the pinned,
+# digest-verified templates from path 2 instead. 0.4.3 through the pinned
+# 0.5.2 embed templates byte-identical to the pinned ones.
+RESQ_MIN_HOOKS_VERSION="0.4.3"
+
+# version_at_least <have> <want> — numeric X.Y.Z comparison, POSIX sh.
+version_at_least() {
+    _va_have="$1"; _va_want="$2"
+    for _va_i in 1 2 3; do
+        _va_h="$(printf '%s' "$_va_have" | cut -d. -f"$_va_i")"
+        _va_w="$(printf '%s' "$_va_want" | cut -d. -f"$_va_i")"
+        [ "${_va_h:-0}" -gt "${_va_w:-0}" ] && return 0
+        [ "${_va_h:-0}" -lt "${_va_w:-0}" ] && return 1
+    done
+    return 0
+}
+
+RESQ_TEMPLATES_OK=0
+if [ -n "$RESQ_BIN" ]; then
+    resq_version="$("$RESQ_BIN" --version 2>/dev/null | head -1 \
+        | sed -n 's/^resq[^ ]* v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+    if [ -n "$resq_version" ] && version_at_least "$resq_version" "$RESQ_MIN_HOOKS_VERSION"; then
+        RESQ_TEMPLATES_OK=1
+    else
+        printf 'warn  %s reports version %s; its embedded hooks predate the granular\n' \
+            "$RESQ_BIN" "${resq_version:-<unreadable>}" >&2
+        printf '      GIT_HOOKS_SKIP fix (needs >= %s). Installing the pinned, verified hooks\n' \
+            "$RESQ_MIN_HOOKS_VERSION" >&2
+        printf '      instead. Upgrade resq too — the new hooks may pass it flags it lacks:\n' >&2
+        printf '      curl -fsSL https://raw.githubusercontent.com/resq-software/dev/main/scripts/install-resq.sh | sh\n' >&2
+    fi
+fi
+
 # ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
 # Prefer the new `hooks install` path; fall back to `dev install-hooks` for
 # binaries built before resq-software/crates#60.
-if [ -n "$RESQ_BIN" ]; then
+if [ "$RESQ_TEMPLATES_OK" = 1 ]; then
     if "$RESQ_BIN" hooks install --help >/dev/null 2>&1; then
         install_cmd="hooks install"
     else

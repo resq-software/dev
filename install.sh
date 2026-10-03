@@ -86,7 +86,7 @@ DIST_BASE="https://get.resq.software"
 # the hook installer. A compromised endpoint still cannot get code past it.
 # Regenerate with:
 #   git cat-file blob "$(git rev-parse "v$SCRIPT_VERSION"):scripts/install-hooks.sh" | sha256sum
-HOOKS_SHA256="2f9fd2998ad74a067a0676b2fb135659c14446c5f620169e99f11f5d58cf7a27"
+HOOKS_SHA256="9e1afcf2858351ef180bf63c29c23769294c29ebf3f886f037cef9193d868488"
 
 # Canonical repo table — one source of truth for the menu, REPO validation, and
 # the post-install summary. Those used to be three separate lists that could

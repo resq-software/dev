@@ -190,8 +190,11 @@ commas, colons or spaces; case-insensitive.
 | `local` | the repo's `local-<hook>` override (not `local-prepare-commit-msg`) |
 
 **Exception:** `prepare-commit-msg` has no `GIT_HOOKS_SKIP` handling at the
-pinned crates commit. It always adds the ticket prefix and always dispatches to
-`local-prepare-commit-msg`, prints no banner, and gates nothing.
+pinned crates commit, so no token changes what it does. It exits first, doing
+nothing, for message sources `message` (`-m`/`-F`), `merge`, `squash` and
+`commit` (`-c`/`-C`/`--amend`), and on a detached HEAD. Otherwise it adds a
+`[TICKET-123]` prefix when the branch name carries one and dispatches to
+`local-prepare-commit-msg`. It prints no banner and gates nothing.
 
 ```sh
 GIT_HOOKS_SKIP=audit git commit -m "..."       # audit off; secret scan still runs

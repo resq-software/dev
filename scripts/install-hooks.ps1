@@ -67,10 +67,33 @@ if ($onPath) {
     $resqBin = Join-Path $HOME '.cargo/bin/resq.exe'
 }
 
+# ── Is that resq new enough to supply the hooks? ────────────────────────────
+# Path 1 installs the templates EMBEDDED in the binary, so an old resq installs
+# old hooks. Before resq-cli 0.4.3 (resq-software/crates#206) they carried the
+# blanket GIT_HOOKS_SKIP guard, under which a granular-looking
+# GIT_HOOKS_SKIP=audit also disabled the secret scan. A binary below this
+# floor, or one whose version cannot be read, gets the pinned, digest-verified
+# templates from path 2 instead. Keep in step with install-hooks.sh.
+$resqMinHooksVersion = [version]'0.4.3'
+$resqTemplatesOk = $false
+if ($resqBin) {
+    $resqVersion = $null
+    $versionLine = (& $resqBin --version 2>$null | Select-Object -First 1)
+    if ("$versionLine" -match '^resq\S* v?(\d+\.\d+\.\d+)') { $resqVersion = [version]$Matches[1] }
+    if ($resqVersion -and $resqVersion -ge $resqMinHooksVersion) {
+        $resqTemplatesOk = $true
+    } else {
+        $shown = if ($resqVersion) { "$resqVersion" } else { '<unreadable>' }
+        Write-Host "warn  $resqBin reports version $shown; its embedded hooks predate the granular" -ForegroundColor Yellow
+        Write-Host "      GIT_HOOKS_SKIP fix (needs >= $resqMinHooksVersion). Installing the pinned, verified hooks" -ForegroundColor Yellow
+        Write-Host "      instead. Upgrade resq too - the new hooks may pass it flags it lacks." -ForegroundColor Yellow
+    }
+}
+
 # ── Path 1: use resq when present (preferred — offline, no raw fetch) ───────
 # Prefer the new `hooks install` path; fall back to `dev install-hooks`
 # for binaries built before resq-software/crates#60.
-if ($resqBin) {
+if ($resqTemplatesOk) {
     & $resqBin hooks install --help *> $null
     $installArgs = if ($LASTEXITCODE -eq 0) { @('hooks', 'install') } else { @('dev', 'install-hooks') }
     Write-Host "info  Installing hooks via $resqBin $($installArgs -join ' ')" -ForegroundColor Cyan
