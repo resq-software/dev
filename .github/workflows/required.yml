@@ -550,7 +550,7 @@ jobs:
       # only exists from Node 23.6 — on an older default runner image the
       # import fails outright. Leaving that to whatever the image ships is the
       # kind of unstated assumption this repo pins everything else against.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           # setup-node v7 added package-manager-cache, which defaults to TRUE
