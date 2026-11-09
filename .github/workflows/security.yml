@@ -31,7 +31,7 @@ jobs:
     # startup-fails for Dependabot's restricted context, which blocks Dependabot's own security
     # PRs. Dependabot already vetted the bump; push/schedule still scan the default branch.
     if: ${{ github.actor != 'dependabot[bot]' }}
-    uses: resq-software/.github/.github/workflows/security-scan.yml@44987ffd6eb5b1aa9d0a0d39e8dde9d669fe1d84 # main
+    uses: resq-software/.github/.github/workflows/security-scan.yml@9b8f49927aa789aef1a99e5afc4c1e2278b2dfc0 # main
     with:
       # No `languages:` on purpose — CodeQL on this repo is GitHub's code
       # scanning DEFAULT SETUP, not this workflow. While both existed the
