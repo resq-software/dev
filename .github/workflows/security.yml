@@ -33,7 +33,6 @@ jobs:
     if: ${{ github.actor != 'dependabot[bot]' }}
     uses: resq-software/.github/.github/workflows/security-scan.yml@9b8f49927aa789aef1a99e5afc4c1e2278b2dfc0 # main
     with:
-      enable-private-name-guard: true
       # No `languages:` on purpose — CodeQL on this repo is GitHub's code
       # scanning DEFAULT SETUP, not this workflow. While both existed the
       # reusable's CodeQL job ran, then had its upload refused:
@@ -48,6 +47,5 @@ jobs:
     # of `secrets: inherit` (which hands it ALL of this repo's secrets and
     # trips zizmor's `secrets-inherit` audit).
     secrets:
-      PRIVATE_NAME_GUARD_TOKEN: ${{ secrets.PRIVATE_NAME_GUARD_TOKEN }}
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
