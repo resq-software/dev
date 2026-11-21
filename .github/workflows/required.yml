@@ -603,8 +603,17 @@ jobs:
     name: private-name-guard
     # Dependabot's restricted context resolves Actions secrets to empty, so
     # the guard cannot authenticate on its pull requests. The aggregate below
-    # tolerates the resulting skip for that actor alone.
-    if: ${{ github.actor != 'dependabot[bot]' }}
+    # tolerates the resulting skip, but only on a pull request Dependabot
+    # actually opened.
+    #
+    # Both halves are tested. github.actor names whoever last triggered the
+    # run, so it flips on a re-run and can read `dependabot[bot]` on a pull
+    # request Dependabot did not open (zizmor bot-conditions). user.login on
+    # the pull_request payload is fixed at trigger time from the original
+    # author and cannot be spoofed that way, so the pair is what decides.
+    if: >-
+      ${{ github.actor != 'dependabot[bot]'
+          || github.event.pull_request.user.login != 'dependabot[bot]' }}
     uses: resq-software/.github/.github/workflows/private-name-guard.yml@03bd2fc8788be394d96edebcaceb3b3735bb2cbc # main
     secrets:
       PRIVATE_NAME_GUARD_TOKEN: ${{ secrets.PRIVATE_NAME_GUARD_TOKEN }}
@@ -619,6 +628,7 @@ jobs:
         env:
           GUARD: ${{ needs.private-name-guard.result }}
           ACTOR: ${{ github.actor }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           for r in \
@@ -633,10 +643,21 @@ jobs:
           # also the fork case -- a fork cannot reach PRIVATE_NAME_GUARD_TOKEN,
           # so it fails closed and needs a maintainer to re-run from a branch
           # here. This aggregate is the only context the org ruleset watches,
-          # so anything tolerated here is tolerated at merge. Dependabot is the
-          # single allowed skip, for the reason given on the job itself.
-          case "$ACTOR:$GUARD" in
-            "dependabot[bot]:skipped"|*":success") echo "ok: private-name-guard=$GUARD" ;;
-            *) echo "::error::private-name-guard returned: $GUARD"; exit 1 ;;
-          esac
+          # so anything tolerated here is tolerated at merge.
+          #
+          # A Dependabot pull request is the single allowed skip, for the
+          # reason given on the guard job. Tolerating it takes BOTH the
+          # triggering actor and the pull request's author: github.actor on
+          # its own flips on a re-run and would hand the skip to a
+          # human-authored pull request (zizmor bot-conditions).
+          if [ "$GUARD" = "success" ]; then
+            echo "ok: private-name-guard=success"
+          elif [ "$GUARD" = "skipped" ] \
+            && [ "$ACTOR" = "dependabot[bot]" ] \
+            && [ "$AUTHOR" = "dependabot[bot]" ]; then
+            echo "ok: private-name-guard skipped on a Dependabot pull request"
+          else
+            echo "::error::private-name-guard returned: $GUARD"
+            exit 1
+          fi
           echo "ok — all required checks passed"
