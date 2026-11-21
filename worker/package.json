@@ -41,8 +41,28 @@
     "typescript": "7.0.2",
     "wrangler": "4.123.0"
   },
+  "//overrides": [
+    "miniflare, reached through wrangler, pins sharp and undici to versions",
+    "that have since picked up advisories (GHSA-wq5f-xc86-pv6w for sharp;",
+    "GHSA-2m5v-pch6-74hx and seven more for undici). Upstream has not moved,",
+    "and osv-scanner reads this lockfile, so the finding stands until it is",
+    "overridden here.",
+    "",
+    "Neither package ships. The deployed bundle is src/index.ts and nothing",
+    "else; both arrive only through the local dev server.",
+    "",
+    "Each is the lowest published version that clears its advisory, which is",
+    "not the same size of jump in both cases: sharp 0.35.4 -> 0.35.5 is a",
+    "patch, undici 7.29.1 -> 7.30.1 crosses a minor. miniflare asks for",
+    "undici 7.29.0, so the override is already ahead of what it pins and this",
+    "widens that gap by one minor -- worth a look if the dev server starts",
+    "behaving oddly, though undici is semver-minor here, not breaking.",
+    "",
+    "Raise each one again when the next advisory lands, or drop it once",
+    "miniflare pins at or above it on its own."
+  ],
   "overrides": {
-    "sharp": "0.35.4",
-    "undici": "7.29.1"
+    "sharp": "0.35.5",
+    "undici": "7.30.1"
   }
 }

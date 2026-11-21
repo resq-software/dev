@@ -594,13 +594,44 @@ jobs:
           node --version
           node worker/test/index.test.mjs
 
+  # ── Private-name guard ──────────────────────────────────────────────
+  # Called from here and not from security.yml: `needs:` cannot reach across
+  # workflow files, and the org ruleset watches only the `required` context.
+  # A guard that reports into nothing cannot stop a merge, however loudly it
+  # fails.
+  private-name-guard:
+    name: private-name-guard
+    # Dependabot's restricted context resolves Actions secrets to empty, so
+    # the guard cannot authenticate on its pull requests. The aggregate below
+    # tolerates the resulting skip, but only on a pull request Dependabot
+    # actually opened.
+    #
+    # Both halves are tested, because github.actor does not mean "the author".
+    # It names the account that triggered the run; on a re-run it stays as the
+    # initial triggerer while github.triggering_actor names whoever pressed
+    # the button. Nothing in it is pinned to who opened the pull request,
+    # which is what this decision is actually about -- and zizmor's
+    # bot-conditions audit flags comparing it against a bot name for that
+    # reason. user.login on the pull_request payload IS the author, fixed at
+    # trigger time, so the pair of them is what decides.
+    if: >-
+      ${{ github.actor != 'dependabot[bot]'
+          || github.event.pull_request.user.login != 'dependabot[bot]' }}
+    uses: resq-software/.github/.github/workflows/private-name-guard.yml@03bd2fc8788be394d96edebcaceb3b3735bb2cbc # main
+    secrets:
+      PRIVATE_NAME_GUARD_TOKEN: ${{ secrets.PRIVATE_NAME_GUARD_TOKEN }}
+
   required:
     name: required
-    needs: [shellcheck, powershell, worker]
+    needs: [shellcheck, powershell, worker, private-name-guard]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Gate on required checks
+        env:
+          GUARD: ${{ needs.private-name-guard.result }}
+          ACTOR: ${{ github.actor }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           for r in \
@@ -611,4 +642,33 @@ jobs:
             echo "$name: $res"
             [ "$res" = "success" ] || { echo "::error::required check '$name' did not pass"; exit 1; }
           done
+          # The guard is strict: a SKIPPED guard means no check ran, which is
+          # also the fork case -- a fork cannot reach PRIVATE_NAME_GUARD_TOKEN,
+          # so it fails closed and needs a maintainer to re-run from a branch
+          # here. This aggregate is the only context the org ruleset watches,
+          # so anything tolerated here is tolerated at merge.
+          #
+          # A Dependabot pull request is the single allowed skip, for the
+          # reason given on the guard job. Tolerating it takes BOTH the
+          # triggering account and the pull request's author, because
+          # github.actor alone says who started the run and never says who
+          # opened the pull request (zizmor bot-conditions).
+          #
+          # github.triggering_actor is deliberately NOT in the test. A human
+          # re-run of a Dependabot run still executes with github.actor's
+          # privileges, so the Dependabot secret store is still what the
+          # guard would read from and it still cannot authenticate: adding
+          # that check would turn every re-run of a Dependabot pull request
+          # red without scanning anything. The skip disappears for real once
+          # a Dependabot-scoped token exists -- see resq-software/.github#92.
+          if [ "$GUARD" = "success" ]; then
+            echo "ok: private-name-guard=success"
+          elif [ "$GUARD" = "skipped" ] \
+            && [ "$ACTOR" = "dependabot[bot]" ] \
+            && [ "$AUTHOR" = "dependabot[bot]" ]; then
+            echo "ok: private-name-guard skipped on a Dependabot pull request"
+          else
+            echo "::error::private-name-guard returned: $GUARD"
+            exit 1
+          fi
           echo "ok — all required checks passed"
