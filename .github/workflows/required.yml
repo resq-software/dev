@@ -606,11 +606,14 @@ jobs:
     # tolerates the resulting skip, but only on a pull request Dependabot
     # actually opened.
     #
-    # Both halves are tested. github.actor names whoever last triggered the
-    # run, so it flips on a re-run and can read `dependabot[bot]` on a pull
-    # request Dependabot did not open (zizmor bot-conditions). user.login on
-    # the pull_request payload is fixed at trigger time from the original
-    # author and cannot be spoofed that way, so the pair is what decides.
+    # Both halves are tested, because github.actor does not mean "the author".
+    # It names the account that triggered the run; on a re-run it stays as the
+    # initial triggerer while github.triggering_actor names whoever pressed
+    # the button. Nothing in it is pinned to who opened the pull request,
+    # which is what this decision is actually about -- and zizmor's
+    # bot-conditions audit flags comparing it against a bot name for that
+    # reason. user.login on the pull_request payload IS the author, fixed at
+    # trigger time, so the pair of them is what decides.
     if: >-
       ${{ github.actor != 'dependabot[bot]'
           || github.event.pull_request.user.login != 'dependabot[bot]' }}
@@ -647,9 +650,17 @@ jobs:
           #
           # A Dependabot pull request is the single allowed skip, for the
           # reason given on the guard job. Tolerating it takes BOTH the
-          # triggering actor and the pull request's author: github.actor on
-          # its own flips on a re-run and would hand the skip to a
-          # human-authored pull request (zizmor bot-conditions).
+          # triggering account and the pull request's author, because
+          # github.actor alone says who started the run and never says who
+          # opened the pull request (zizmor bot-conditions).
+          #
+          # github.triggering_actor is deliberately NOT in the test. A human
+          # re-run of a Dependabot run still executes with github.actor's
+          # privileges, so the Dependabot secret store is still what the
+          # guard would read from and it still cannot authenticate: adding
+          # that check would turn every re-run of a Dependabot pull request
+          # red without scanning anything. The skip disappears for real once
+          # a Dependabot-scoped token exists -- see resq-software/.github#92.
           if [ "$GUARD" = "success" ]; then
             echo "ok: private-name-guard=success"
           elif [ "$GUARD" = "skipped" ] \
